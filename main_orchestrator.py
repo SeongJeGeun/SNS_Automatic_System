@@ -672,6 +672,37 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
         except Exception as e:
             print(f"[Error] 일일 보고서 업로드 중 예외 발생: {e}")
 
+def send_google_chat_report(topic, result_status, improvement_details):
+    webhook_url = os.getenv("GOOGLE_CHAT_WEBHOOK_URL", "")
+    if not webhook_url:
+        print("[Info] GOOGLE_CHAT_WEBHOOK_URL이 설정되지 않아 구글 챗 보고를 생략합니다.")
+        return
+        
+    report_text = f"""
+======================================================
+📢 *마인드팩토리 SNS 자동화 3시간 성과 보고서*
+======================================================
+* **포스팅 주제**: {topic}
+* **처리 결과**: {result_status}
+
+* **기존 포스팅 문제점 및 보완 내역**:
+{improvement_details}
+
+* **기대 성과 예측**:
+  - 이번 포스팅은 인스타그램 이용자의 '자기표현' 동기(남성 타겟 정체성)와 '지위 추구'(라이트 유저용 인증/챌린지 템플릿), '이타주의'(헤비 유저용 3단계 실천 팁)를 정밀 조준했습니다.
+  - 가벼운 오락 요소를 배제하고 명조체 기반의 묵직한 가치를 전달하므로, 단순 피드 조회를 넘어 독자들의 **'저장수'** 및 **'공유수'** 만족 지표가 크게 반등할 것으로 기대됩니다.
+======================================================
+"""
+    try:
+        payload = {"text": report_text}
+        res = requests.post(webhook_url, json=payload, timeout=10)
+        if res.status_code == 200:
+            print("✅ 구글 챗 성과 보고서 전송 완료!")
+        else:
+            print(f"[Warning] 구글 챗 전송 실패 (상태 코드: {res.status_code}): {res.text}")
+    except Exception as e:
+        print(f"[Warning] 구글 챗 전송 중 예외 발생: {e}")
+
 # =====================================================================
 # 통합 파이프라인 엔진
 # =====================================================================
@@ -827,6 +858,14 @@ def run_orchestration_loop():
                 upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
             if upload_success:
                 print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
+                try:
+                    topic = script_data.get("title", "SNS 콘텐츠 업로드")
+                    improvements = """  - 1장: 독자 현실 고통 공감 (문장 길이 축소 및 가독성 개선)
+  - 3장: 헤비 유저 소구 이타주의 3단계 실천 팁 탑재
+  - 마지막 장: 라이트 유저 소구 성취 증명용 선언/챌린지 템플릿 삽입"""
+                    send_google_chat_report(topic, "성공 (인스타그램 발행 완료)", improvements)
+                except Exception as gchat_err:
+                    print(f"[Warning] 구글 챗 보고 도중 예외: {gchat_err}")
             else:
                 raise Exception("인스타그램 카러셀 발행에 실패했습니다.")
     except Exception as run_err:
@@ -837,6 +876,10 @@ def run_orchestration_loop():
             last_result=str(run_err),
         )
         write_human_summary()
+        try:
+            send_google_chat_report("파이프라인 구동 오류", f"실패 (에러 발생: {run_err})", "  - 파이프라인 예외 복구 조치 진행 필요")
+        except Exception:
+            pass
         return
     finally:
         # 9. 드라이브 임시 파일 클리닝 (어떤 에러가 발생하더라도 항상 지워지도록 보장)

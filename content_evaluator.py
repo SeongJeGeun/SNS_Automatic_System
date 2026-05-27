@@ -74,7 +74,29 @@ def evaluate_script_quality(
     else:
         findings.append("오늘 바로 할 수 있는 행동 제안이 부족합니다.")
 
+    # 5대 공유 요인 추가 검증
+    # 중간 장(3~4장) 이타주의 자극 3단계 실천 팁
+    mid_pages_text = ""
+    if len(pages) >= 4:
+        mid_pages_text = " ".join([text_of(pages[2]), text_of(pages[3])])
+    elif len(pages) >= 3:
+        mid_pages_text = text_of(pages[2])
+    
+    has_altruistic_tip = any(word in mid_pages_text for word in ["단계", "팁", "방법", "원칙", "요약"])
+    if has_altruistic_tip:
+        score += 8
+    else:
+        findings.append("중간 장(3~4장)에 이타주의 자극을 위한 명확한 3단계 실천 팁/요약이 부족합니다.")
+
     last_text = text_of(pages[-1]) if pages else ""
+
+    # 마지막 장 인증/챌린지 템플릿
+    has_status_template = any(word in last_text for word in ["챌린지", "템플릿", "인증", "선언", "기록지", "미션"])
+    if has_status_template:
+        score += 8
+    else:
+        findings.append("마지막 장에 라이트 유저의 성취 증명을 돕는 인증/챌린지 템플릿 문구가 누락되었습니다.")
+
     if count_matches(last_text, SAVE_WORDS) >= 1:
         score += 12
     else:
