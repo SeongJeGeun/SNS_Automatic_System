@@ -700,75 +700,48 @@ def run_orchestration_loop():
     
     # 3. 월 단위 시트 탭 매칭
     gsm = None
-    with agent_step("Sheet Agent"    # 8. 구글 드라이브 임시 호스팅 연동
-    print("\n[Step 3] 구글 드라이브 임시 이미지 업로드 및 퍼블릭 링크 생성 중...")
+    worksheet = None
+    with agent_step("Sheet Agent", "성과 기록 시트 준비"):
+        gsm, worksheet = get_sheet_and_ensure_tab(gspread_client, drive_service, system_folder_id)
     
-    script_file = "script.json"
-    if not os.path.exists(script_file):
-        print("[Error] script.json 파일이 존재하지 않아 진행할 수 없습니다.")
-        return
-        
+    # 4. 직전 성과 분석에 따른 자가치유 트리거
+    with agent_step("Growth Agent", "직전 성과 분석"):
+        need_healing, last_title, last_content, impressions = check_last_post_performance(worksheet)
+    
+    if need_healing:
+        with agent_step("Recovery Agent", "저성과 원인 분석 및 개선 지침 생성"):
+            analyze_and_generate_strategy(last_title, last_content, impressions)
+    else:
+        strategy_file = "self_healing_strategy.json"
+        if os.path.exists(strategy_file):
+            try:
+                os.remove(strategy_file)
+                print("✨ [자가치유 종료] 직전 피드 성과가 양호하여 이전 자가치유 전략을 제거했습니다.")
+            except Exception as e:
+                print(f"[Warning] 이전 자가치유 전략 파일 삭제 실패: {e}")
+    
+    # 실시간 구글 서치(DuckDuckGo)를 통한 트렌드 학습 및 md 파일 누적 저장
     try:
-        with open(script_file, "r", encoding="utf-8") as f:
-            script_data = json.load(f)
-        pages_count = len(script_data.get("pages", []))
+        with agent_step("Trend Agent", "인스타그램 트렌드 검색/저장"):
+            from constants import OBSIDIAN_VAULT_PATH
+            print("\n[Trend Search] 인스타그램 트렌드 실시간 구글 서치(DuckDuckGo) 학습 가동...")
+            search_and_save_trends(OBSIDIAN_VAULT_PATH)
     except Exception as e:
-        print(f"[Error] script.json 파싱 실패: {e}")
-        return
-        
-    drive_file_ids = []
-    direct_urls = []
-    
+        print(f"[Warning] 실시간 트렌드 검색/저장 실패: {e}")
+
+    # 옵시디언 메모 벡터 DB 실시간 동적 갱신 및 빌드
     try:
-        with agent_step("Hosting Agent", "Google Drive 임시 이미지 호스팅"):
-            for i in range(1, pages_count + 1):
-                file_path = f"page{i}.png"
-                fid, durl = upload_temp_image_to_drive(drive_service, file_path, report_folder_id)
-                if fid and durl:
-                    drive_file_ids.append(fid)
-                    direct_urls.append(durl)
-                else:
-                    print(f"[Error] 드라이브 임시 업로드에 치명적 결함이 감지되어 취소합니다.")
-                    update_pipeline(
-                        state="stopped",
-                        last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        last_result="hosting_failed",
-                    )
-                    write_human_summary()
-                    return
-                
-        # 8. 인스타 발행 구동 (드라이브 주소 주입)
-        if len(direct_urls) == pages_count:
-            # 프로그램 호출 방식으로 깔끔하게 실행 (로컬 이미지 및 로그 기입까지 완료함)
-            with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
-                upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
-            if upload_success:
-                print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
-    except Exception as run_err:
-        print(f"[Error] 파이프라인 실행 중 예외 발생: {run_err}")
-        update_pipeline(
-            state="error",
-            last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            last_result=str(run_err),
-        )
-        write_human_summary()
-        return
-    finally:
-        # 9. 드라이브 임시 파일 클리닝 (어떤 에러가 발생하더라도 항상 지워지도록 보장)
-        if drive_file_ids:
-            with agent_step("Cleanup Agent", "임시 호스팅 파일 정리"):
-                clean_drive_temp_files(drive_service, drive_file_ids)
-            
-    # 10. 아침 9시 성과 보고서 체크
-    with agent_step("Report Agent", "일일 보고서 생성 여부 확인"):
-        check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id)
- 
-    update_pipeline(
-        state="waiting",
-        last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        last_result="success",
-    )
-    write_human_summary()
+        with agent_step("RAG Agent", "옵시디언 메모 인덱싱"):
+            print("\n[RAG] 대본 기획 전 옵시디언 보관소 실시간 인덱싱 가동...")
+            from obsidian_rag import ObsidianRAGEngine
+            from constants import OBSIDIAN_VAULT_PATH
+            rag = ObsidianRAGEngine(vault_path=OBSIDIAN_VAULT_PATH)
+            rag.build_or_update_db()
+    except Exception as e:
+        print(f"[Warning] 옵시디언 RAG DB 자동 인덱싱 실패: {e}")
+
+    # 5. 사람들의 현재 삶/고민을 먼저 정리해 대본 생성의 입력값으로 고정
+    try:
         with agent_step("Audience Agent", "사람들의 현재 고민/감정 분석"):
             print("\n[Audience Agent] 요즘 사람들이 힘들어하는 지점과 필요한 메시지 분석...")
             create_audience_insight()
@@ -818,8 +791,9 @@ def run_orchestration_loop():
         write_human_summary()
         return
         
-    # 8. 구글 드라이브 임시 호스팅 연동
-    print("\n[Step 3] 구글 드라이브 임시 이미지 업로드 및 퍼블릭 링크 생성 중...")
+    # 8. 구글 드라이브 임시 호스팅 연동 및 인스타그램 업로드
+    drive_file_ids = []
+    direct_urls = []
     
     script_file = "script.json"
     if not os.path.exists(script_file):
@@ -833,43 +807,47 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Error] script.json 파싱 실패: {e}")
         return
-        
-    drive_file_ids = []
-    direct_urls = []
-    
-    with agent_step("Hosting Agent", "Google Drive 임시 이미지 호스팅"):
-        for i in range(1, pages_count + 1):
-            file_path = f"page{i}.png"
-            fid, durl = upload_temp_image_to_drive(drive_service, file_path, report_folder_id)
-            if fid and durl:
-                drive_file_ids.append(fid)
-                direct_urls.append(durl)
+
+    try:
+        with agent_step("Hosting Agent", "Google Drive 임시 이미지 호스팅"):
+            for i in range(1, pages_count + 1):
+                file_path = f"page{i}.png"
+                # 이미지를 주차 폴더의 하위 '보고서' 폴더(report_folder_id)에 업로드함
+                fid, durl = upload_temp_image_to_drive(drive_service, file_path, report_folder_id)
+                if fid and durl:
+                    drive_file_ids.append(fid)
+                    direct_urls.append(durl)
+                else:
+                    raise Exception("드라이브 임시 업로드에 실패했습니다.")
+                
+        # 8. 인스타 발행 구동 (드라이브 주소 주입)
+        if len(direct_urls) == pages_count:
+            # 프로그램 호출 방식으로 깔끔하게 실행 (로컬 이미지 및 로그 기입까지 완료함)
+            with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
+                upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
+            if upload_success:
+                print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
             else:
-                print(f"[Error] 드라이브 임시 업로드에 치명적 결함이 감지되어 취소합니다.")
-                update_pipeline(
-                    state="stopped",
-                    last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    last_result="hosting_failed",
-                )
-                write_human_summary()
-                return
-            
-    # 8. 인스타 발행 구동 (드라이브 주소 주입)
-    if len(direct_urls) == pages_count:
-        # 프로그램 호출 방식으로 깔끔하게 실행 (로컬 이미지 및 로그 기입까지 완료함)
-        with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
-            upload_success = upload_carousel.main(override_urls=direct_urls)
-        
-        # 9. 드라이브 임시 파일 클리닝
-        if upload_success:
+                raise Exception("인스타그램 카러셀 발행에 실패했습니다.")
+    except Exception as run_err:
+        print(f"[Error] 파이프라인 실행 중 예외 발생: {run_err}")
+        update_pipeline(
+            state="error",
+            last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            last_result=str(run_err),
+        )
+        write_human_summary()
+        return
+    finally:
+        # 9. 드라이브 임시 파일 클리닝 (어떤 에러가 발생하더라도 항상 지워지도록 보장)
+        if drive_file_ids:
             with agent_step("Cleanup Agent", "임시 호스팅 파일 정리"):
                 clean_drive_temp_files(drive_service, drive_file_ids)
-            print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
             
     # 10. 아침 9시 성과 보고서 체크
     with agent_step("Report Agent", "일일 보고서 생성 여부 확인"):
         check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id)
-
+  
     update_pipeline(
         state="waiting",
         last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

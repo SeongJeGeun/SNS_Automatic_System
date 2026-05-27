@@ -4,11 +4,11 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 class GoogleSheetManager:
-    def __init__(self, credentials_path="google_creds.json", sheet_name="MindFactory_SNS_Dashboard", tab_name=None):
+    def __init__(self, credentials_path="google_creds.json", sheet_name="MindFactory_SNS_Dashboard", tab_name=None, gspread_client=None):
         self.credentials_path = credentials_path
         self.sheet_name = sheet_name
         self.tab_name = tab_name
-        self.client = self._authenticate()
+        self.client = gspread_client if gspread_client else self._authenticate()
         self.sheet = self._get_or_create_sheet()
 
     def _authenticate(self):

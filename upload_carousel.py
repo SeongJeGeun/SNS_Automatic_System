@@ -25,8 +25,7 @@ MANUAL_IMAGE_URLS = []
 def get_script_data():
     script_file = "script.json"
     if not os.path.exists(script_file):
-        print(f"[Error] {script_file} 파일을 찾을 수 없습니다. 먼저 1단계를 완료하세요.")
-        sys.exit(1)
+        raise FileNotFoundError(f"[Error] {script_file} 파일을 찾을 수 없습니다. 먼저 1단계를 완료하세요.")
         
     with open(script_file, "r", encoding="utf-8") as f:
         data = json.load(f)
