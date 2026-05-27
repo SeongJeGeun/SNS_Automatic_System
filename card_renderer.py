@@ -181,3 +181,7 @@ def generate_card_news_images(script_file="script.json"):
     except Exception as exc:
         print(f"[Error] 카드뉴스 이미지 합성 실패: {exc}")
         return False
+
+
+if __name__ == "__main__":
+    generate_card_news_images()

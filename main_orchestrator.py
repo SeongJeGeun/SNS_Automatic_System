@@ -33,6 +33,21 @@ from telegram_agent import (
 )
 
 
+def get_dynamic_wait_seconds(default_seconds):
+    try:
+        from optimal_timing import get_recommended_sleep_seconds
+        sleep_seconds = get_recommended_sleep_seconds()
+        if sleep_seconds is None:
+            return default_seconds
+
+        minimum_guard = int(os.getenv("MIN_PIPELINE_INTERVAL_SECONDS", "1800"))
+        maximum_guard = int(os.getenv("MAX_PIPELINE_INTERVAL_SECONDS", str(24 * 3600)))
+        return max(minimum_guard, min(maximum_guard, sleep_seconds))
+    except Exception as exc:
+        print(f"[Warning] 최적 업로드 시간 계산 실패. 기본 간격을 사용합니다: {exc}")
+        return default_seconds
+
+
 def sync_publish_reports_to_obsidian():
     try:
         from obsidian_publish_sync import sync_all_publish_reports
@@ -41,6 +56,14 @@ def sync_publish_reports_to_obsidian():
             print(f"[Obsidian Sync] 발행 데이터 {len(results)}건을 지식 베이스와 동기화했습니다.")
     except Exception as exc:
         print(f"[Warning] Obsidian 발행 데이터 동기화 실패: {exc}")
+
+
+def sync_insights_and_strategy():
+    try:
+        import update_insights
+        update_insights.main()
+    except Exception as exc:
+        print(f"[Warning] 인사이트 업데이트 실패: {exc}")
 
 def search_and_save_trends(vault_path):
     """Antigravity CLI 검색으로 트렌드 조사 결과를 옵시디언 폴더에 저장"""
@@ -523,6 +546,13 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Warning] 실시간 트렌드 검색/저장 실패: {e}")
 
+    try:
+        with agent_step("Insight Agent", "인사이트 업데이트 및 성과 전략 반영"):
+            print("\n[Insight Agent] Instagram/Threads 실성과 수집 후 전략에 반영...")
+            sync_insights_and_strategy()
+    except Exception as e:
+        print(f"[Warning] 인사이트 업데이트/전략 반영 단계 실패: {e}")
+
     # 옵시디언 메모 벡터 DB 실시간 동적 갱신 및 빌드
     try:
         with agent_step("RAG Agent", "옵시디언 메모 인덱싱"):
@@ -720,12 +750,13 @@ def main():
 
     while True:
         try:
-            next_at = next_run_time(INTERVAL_SECONDS)
+            wait_seconds = get_dynamic_wait_seconds(INTERVAL_SECONDS)
+            next_at = next_run_time(wait_seconds)
             update_pipeline(state="waiting", next_run_at=next_at)
             write_human_summary()
-            print(f"\n[Orchestrator] 다음 가동 시점까지 대기 중... (3시간, 다음 실행: {next_at})")
+            print(f"\n[Orchestrator] 다음 가동 시점까지 대기 중... ({wait_seconds/3600:.2f}시간, 다음 실행: {next_at})")
             run_now = False
-            for _ in range(INTERVAL_SECONDS // 60):
+            for _ in range(wait_seconds // 60):
                 heartbeat("waiting_for_next_run")
                 write_human_summary()
                 if process_telegram_commands().get("run_now"):
@@ -733,7 +764,7 @@ def main():
                     run_now = True
                     break
                 time.sleep(60)
-            remaining = INTERVAL_SECONDS % 60
+            remaining = wait_seconds % 60
             if remaining and not run_now:
                 time.sleep(remaining)
             run_orchestration_loop()

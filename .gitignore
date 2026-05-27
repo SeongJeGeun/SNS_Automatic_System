@@ -17,6 +17,8 @@ page*.png
 generated_backgrounds/
 agent_runs/
 /logs/
+/shared/performance_log.json
+/shared/optimal_timing.json
 /jobs/active/
 /jobs/archive/
 /obsidian_vault/

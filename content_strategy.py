@@ -46,6 +46,7 @@ def create_content_strategy(
     output_file="content_strategy.json",
 ):
     audience = load_json(audience_file) or {}
+    previous_strategy = load_json(output_file) or {}
     strategy = dict(DEFAULT_STRATEGY)
 
     if audience.get("audience_state"):
@@ -59,6 +60,19 @@ def create_content_strategy(
         strategy["story_angle"] = audience["story_angle"]
     if audience.get("emotional_keywords"):
         strategy["emotional_keywords"] = audience["emotional_keywords"]
+    if audience.get("trending_topics"):
+        strategy["trending_topics"] = audience["trending_topics"]
+    if audience.get("hot_pain_keywords"):
+        strategy["hot_pain_keywords"] = audience["hot_pain_keywords"]
+        strategy["hook_rules"] = merge_unique(
+            strategy["hook_rules"],
+            [
+                "첫 장 heading에는 오늘 검색에서 강하게 반복된 고통 키워드를 1개 이상 반영한다: "
+                + ", ".join(audience["hot_pain_keywords"][:5])
+            ],
+        )
+
+    merge_performance_learning(strategy, previous_strategy)
 
     strategy["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     strategy["quality_bar"] = {
@@ -80,6 +94,56 @@ def create_content_strategy(
     write_strategy_brief(strategy)
     print(f"[Strategy Agent] 콘텐츠 전략 생성 완료: {output_file}")
     return strategy
+
+
+def merge_performance_learning(strategy, previous_strategy):
+    passthrough_fields = [
+        "best_hook_patterns",
+        "best_card_count",
+        "proven_cta_phrases",
+        "performance_learning",
+    ]
+    for field in passthrough_fields:
+        if previous_strategy.get(field):
+            strategy[field] = previous_strategy[field]
+
+    if previous_strategy.get("best_hook_patterns"):
+        strategy["hook_rules"] = merge_unique(
+            strategy["hook_rules"],
+            [
+                "성과가 검증된 첫 장 heading 패턴을 우선 참고한다: "
+                + " / ".join(previous_strategy["best_hook_patterns"][:5])
+            ],
+        )
+
+    if previous_strategy.get("proven_cta_phrases"):
+        strategy["cta_rule"] = (
+            strategy["cta_rule"]
+            + " 검증된 CTA 표현을 우선 변형해 사용한다: "
+            + " / ".join(previous_strategy["proven_cta_phrases"][:5])
+        )
+
+    if previous_strategy.get("best_card_count"):
+        strategy["best_card_count"] = previous_strategy["best_card_count"]
+        strategy["story_structure"] = merge_unique(
+            strategy["story_structure"],
+            [f"성과 로그 기준 최빈 카드 장 수는 {previous_strategy['best_card_count']}이다."],
+        )
+
+    if previous_strategy.get("avoid"):
+        strategy["avoid"] = merge_unique(strategy["avoid"], previous_strategy["avoid"])
+
+
+def merge_unique(existing, additions):
+    result = []
+    seen = set()
+    for item in list(existing or []) + list(additions or []):
+        item = str(item or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 def write_strategy_brief(strategy, output_file="codex_strategy_brief.md"):
