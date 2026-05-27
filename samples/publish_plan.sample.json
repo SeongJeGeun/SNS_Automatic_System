@@ -1,0 +1,15 @@
+{
+  "publish_mode": "manual_review",
+  "scheduled_time": "2026-05-28T20:30:00+09:00",
+  "requires_human_review": true,
+  "publish_checklist": [
+    "최종 카드 이미지 6 장 존재 확인",
+    "텍스트 오탈자 확인",
+    "캡션 길이 확인",
+    "최근 24 시간 게시 수 확인",
+    "인스타 쿨다운 상태 확인"
+  ],
+  "risk_flags": [
+    "최근 API 제한 이력이 있으면 예약 게시 대신 드래프트 유지"
+  ]
+}

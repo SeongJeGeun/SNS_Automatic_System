@@ -1,0 +1,20 @@
+{
+  "publish_schedule": {
+    "weekly_frequency": 3,
+    "optimal_days": ["Mon", "Wed", "Fri"],
+    "optimal_hours": [8, 12, 18, 22]
+  },
+  "algorithmic_reward_formula": {
+    "weight_likes": 0.1,
+    "weight_comments": 0.5,
+    "weight_saves": 1.0,
+    "weight_shares": 1.5,
+    "penalty_negative_feedback": -2.0
+  },
+  "distribution_strategy": {
+    "exploit_percentage": 80.0,
+    "explore_percentage": 20.0,
+    "exploit_theme": "Mental discipline, System over willpower, Deep Navy theme",
+    "explore_theme": "Soft empathy, White minimalist theme, Question-based hook"
+  }
+}

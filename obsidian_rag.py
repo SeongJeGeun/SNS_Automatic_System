@@ -1,21 +1,31 @@
-import os
 import json
+import os
+import re
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
+
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    _EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+except ImportError:
+    _EMBEDDING_MODEL = None
 
 class ObsidianRAGEngine:
     def __init__(self, vault_path, db_path="faiss_index"):
         self.vault_path = vault_path
         self.db_path = db_path
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        
-        # Google Generative AI Embeddings
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=self.api_key
-        )
+
+        self.embeddings = None
+        if _EMBEDDING_MODEL:
+            print(f"[RAG] 로컬 임베딩 모델 사용: {_EMBEDDING_MODEL}")
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=_EMBEDDING_MODEL,
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True}
+            )
+        else:
+            print("[RAG] 로컬 임베딩 패키지가 없어 키워드 검색 모드로 실행합니다.")
         self.vector_store = None
         self._ensure_fallback_vault()
 
@@ -26,7 +36,7 @@ class ObsidianRAGEngine:
             print("[RAG Alert] 프로젝트 루트 내에 'obsidian_vault' 임시 로컬 메모 저장소를 생성해 가동합니다.")
             self.vault_path = os.path.join(os.getcwd(), "obsidian_vault")
             os.makedirs(self.vault_path, exist_ok=True)
-            
+
             # 기본 철학 및 카피 메모 md 생성
             notes = {
                 "discipline.md": """# 마인드팩토리 - 규율의 미학
@@ -43,7 +53,7 @@ class ObsidianRAGEngine:
 어제보다 1% 나아지는 것에 초점을 맞춰라. 복리의 법칙은 성장에서 가장 강력하게 작동한다.
 변화는 불편한 진실을 수용하고, 그것을 즉각적인 실행으로 파괴해 나가는 과정이다."""
             }
-            
+
             for note_name, content in notes.items():
                 note_path = os.path.join(self.vault_path, note_name)
                 if not os.path.exists(note_path):
@@ -56,14 +66,17 @@ class ObsidianRAGEngine:
         if not os.path.exists(self.vault_path):
             print(f"[Error] 옵시디언 Vault 폴더가 없습니다: {self.vault_path}")
             return False
+        if not self.embeddings:
+            print("[RAG] 키워드 검색 모드에서는 벡터 DB 빌드를 생략합니다.")
+            return False
 
         fingerprint = self._vault_fingerprint()
         if self._is_db_current(fingerprint):
             print("[RAG] 옵시디언 메모 변경 없음. 기존 벡터 DB를 재사용합니다.")
             return self.load_db()
-            
+
         print(f"[RAG] 옵시디언 메모 임베딩 빌드 중: {self.vault_path}")
-        
+
         try:
             # 1. md 파일 로더 설정
             loader = DirectoryLoader(
@@ -76,11 +89,11 @@ class ObsidianRAGEngine:
             if not documents:
                 print("[RAG] 파싱 가능한 마크다운 파일이 존재하지 않습니다.")
                 return False
-                
+
             # 2. 텍스트 분할 (청크 크기 600)
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
             chunks = text_splitter.split_documents(documents)
-            
+
             # 3. 임베딩 계산 및 FAISS 저장
             self.vector_store = FAISS.from_documents(chunks, self.embeddings)
             self.vector_store.save_local(self.db_path)
@@ -132,6 +145,8 @@ class ObsidianRAGEngine:
 
     def load_db(self):
         """로컬 FAISS DB 로드"""
+        if not self.embeddings:
+            return False
         if os.path.exists(self.db_path):
             try:
                 self.vector_store = FAISS.load_local(
@@ -146,13 +161,16 @@ class ObsidianRAGEngine:
 
     def retrieve_context(self, query, k=3):
         """특정 쿼리에 부합하는 옵시디언 메모 맥락 추출"""
+        if not self.embeddings:
+            return self._keyword_search(query, k=k)
+
         if not self.vector_store:
             if not self.load_db():
                 # DB가 없거나 깨졌을 시 즉시 재생성 시도
                 if not self.build_or_update_db():
                     print("[RAG] DB를 조회할 수 없어 RAG 맥락을 생략합니다.")
                     return ""
-                    
+
         try:
             docs = self.vector_store.similarity_search(query, k=k)
             context_parts = []
@@ -163,3 +181,25 @@ class ObsidianRAGEngine:
         except Exception as e:
             print(f"[Warning] 유사도 검색 중 오류 발생: {e}")
             return ""
+
+    def _keyword_search(self, query, k=3):
+        terms = {term for term in re.split(r"\s+", query.strip()) if term}
+        scored = []
+        for root, _, files in os.walk(self.vault_path):
+            for name in files:
+                if not name.endswith(".md"):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception:
+                    continue
+                score = sum(content.count(term) for term in terms)
+                if score:
+                    scored.append((score, name, content[:1200]))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if not scored:
+            return ""
+        return "\n\n".join(f"[{name} 메모]:\n{content}" for _, name, content in scored[:k])

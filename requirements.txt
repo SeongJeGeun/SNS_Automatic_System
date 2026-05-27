@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-dotenv
+requests
+Pillow
+gspread
+google-api-python-client
+google-auth
+google-auth-oauthlib
+oauth2client
+langchain-community
+langchain-text-splitters
+langchain-huggingface
+faiss-cpu
+sentence-transformers

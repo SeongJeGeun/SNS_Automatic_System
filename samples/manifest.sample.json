@@ -1,0 +1,17 @@
+{
+  "job_id": "job_20260527_220100_001",
+  "project": "MindFactory SNS automation",
+  "command_source": "telegram",
+  "user_command": "요즘 번아웃 때문에 아무것도 하기 싫은 사람들을 위한 인스타 카드뉴스 만들어줘",
+  "content_type": "instagram_cardnews",
+  "status": "running",
+  "current_stage": "audience_analysis",
+  "priority": "normal",
+  "approval_required": true,
+  "approved": false,
+  "cooldown_until": null,
+  "retry_count": 0,
+  "last_error": null,
+  "created_at": "2026-05-27T22:01:00+09:00",
+  "updated_at": "2026-05-27T22:01:00+09:00"
+}

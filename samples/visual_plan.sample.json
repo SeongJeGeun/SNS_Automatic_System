@@ -1,0 +1,23 @@
+{
+  "visual_style_summary": "감정 과잉 없이 차분하고 현실적인 무드의 미니멀 에디토리얼 스타일. 텍스트 가독성을 위해 여백과 낮은 자극의 배경을 유지한다.",
+  "pages": [
+    {
+      "page_number": 1,
+      "emotional_intent": "멈춰서 읽게 만드는 공감과 반전",
+      "visual_direction": "창가 옆에 조용히 앉아 있는 인물, 차분한 톤, 넓은 여백",
+      "image_prompt": "soft emotional editorial background, tired office worker by window, muted blue gray tones, calm natural light, negative space for text, instagram card design friendly",
+      "composition_notes": "인물은 화면 하단 또는 측면 배치, 중앙 상단 텍스트 공간 확보",
+      "text_overlay_safety_notes": "상단 40% 는 단순한 배경으로 유지"
+    }
+  ],
+  "visual_consistency_notes": [
+    "전 페이지에서 낮은 채도의 중립 색감 유지",
+    "인물은 과장된 표정 대신 분위기 중심으로 표현",
+    "사진풍 또는 에디토리얼 일러스트풍 중 한 스타일로 통일"
+  ],
+  "text_readability_notes": [
+    "배경 대비가 강하지 않게 유지",
+    "텍스트 영역에는 복잡한 사물 배치 금지",
+    "모바일 화면 기준 2~3 줄 안에 들어오도록 여백 확보"
+  ]
+}

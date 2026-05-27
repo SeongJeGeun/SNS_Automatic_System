@@ -38,6 +38,11 @@ COVER_HOOK_RULES = {
     }
 }
 
-# 옵시디언 로컬 보관소 경로 설정
-OBSIDIAN_VAULT_PATH = "/Users/seongjegeun/Documents/Obsidian_Vault"
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 
+# 옵시디언 로컬 보관소 경로 설정
+PROJECT_ROOT = Path(__file__).resolve().parent
+OBSIDIAN_VAULT_PATH = os.getenv("OBSIDIAN_VAULT_PATH", str(PROJECT_ROOT / "obsidian_vault"))

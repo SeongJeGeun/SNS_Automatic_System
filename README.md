@@ -1,128 +1,154 @@
-# 🧠 마인드팩토리 무인화 공장 시스템 운영 가이드
+# 🧠 MindFactory SNS Automatic System (마스터 운영 매뉴얼)
 
-본 가이드는 마인드팩토리(MindFactory) SNS 자동 제작 및 업로드 파이프라인의 안전한 지속 실행과 예외 처리를 위한 시스템 인프라 관리 백서입니다.
-
----
-
-## 📂 프로젝트 구조
-- `insight_core.json`: 카드뉴스 생성 시 준수해야 할 전역 디자인 및 기획 규칙 정의
-- `script.json`: 1단계 트렌드 분석 및 카피라이팅 결과 스크립트 (JSON)
-- `page1.png` ~ `page5.png`: 최종 생성 및 텍스트 합성 완료된 인스타그램 카드뉴스 이미지 파일들 (1080x1080)
-- `upload_carousel.py`: 인스타그램 공식 API 기반의 5장 슬라이드 게시물 자동 업로더
-- `daily_report.json`: 일일 콘텐츠 발행 및 API 상태 로그 누적 보관 대시보드 데이터
+마인드팩토리의 핵심 3대 철학(**게으름 팩폭, 시스템 구축, 규율과 자유**)을 관통하여 텍스트 소통 중심의 **Threads**와 시각 요약/저장 중심의 **Instagram**을 유기적으로 연동하여 무인으로 운영하는 **텔레그램 연동형 멀티 에이전트 자동화 시스템**입니다.
 
 ---
 
-## 1. 구글 드라이브 백업 연동 가이드
+## 🎯 1. 플랫폼 아키텍처 및 역할
 
-업로드가 완료된 로컬 카드뉴스 이미지 파일을 구글 드라이브 클라우드로 안전하게 이관하여 무제한 보관하는 시스템 연동 코드 및 가이드입니다.
+본 시스템은 Z세대의 '비공개 DM 공유(Sends)' 및 '판단 유예용 저장(Saves)' 행동 양식을 자극하여 플랫폼 간 유기적 트래픽 순환을 유도합니다.
 
-### 🛠️ 준비사항
-1. **Google Cloud Console**에서 프로젝트 생성 및 **Google Drive API** 활성화
-2. **서비스 계정(Service Account)** 생성 및 JSON 키 파일 다운로드 (키 파일명: `google_creds.json`으로 워크스페이스에 저장)
-3. 대상 구글 드라이브 폴더 생성 후, 서비스 계정 이메일 주소(`xxx@xxx.iam.gserviceaccount.com`)에 해당 폴더의 **편집자 권한** 부여
+| 플랫폼 | 주요 역할 | 주요 소비 행동 | 핵심 톤 앤 매너 |
+| :--- | :--- | :--- | :--- |
+| **Threads** | - 화두 던지기 및 1차 훅<br>- 실시간 댓글 핑퐁 소통 | 답글 소통, 리포스트, 친근 리액션 | - **대화체 (~죠, ~요)**<br>- 가볍고 날카로운 구어체 |
+| **Instagram** | - 정보의 구조화 및 시각 요약 카드뉴스<br>- 최종 저장 및 외부 공유 유도 | 저장(Saves), DM 공유(Sends) | - **단정체 (~입니다, ~하세요)**<br>- 신뢰감 있는 브랜드 관점 |
+| **Telegram** | - 양방향 제어 명령 입력<br>- 성공/실패/에스컬레이션 실시간 보고 | 시스템 원격 통제 | - 직관적인 명령 및 에러 스택 보고 |
+| **Sheets / Excel** | - 계정 성장 원장 및 리포트 보존 | 일일 성과 통계 분석 | - 일일/주간 누적 성과 요약 테이블 |
 
-### 💻 설치 패키지
+---
+
+## 🤖 2. 에이전트 인프라 구성 (7대 구성원)
+
+1. **Topic Agent**: RAG 분석을 바탕으로 금주 핵심 주제 1개와 서브 메시지 3개를 도출하고 금지 키워드를 활성화합니다.
+2. **Threads Agent**: 1~2문장의 강한 구어체 훅 포스트와 질문형 댓글 유도 스레드를 기획합니다.
+3. **Instagram Agent**: 쓰레드 반응이 좋았던 주제를 1:3 법칙에 입각하여 7장의 카드뉴스 대본으로 확장하며 저장 유도형 캡션을 작성합니다.
+4. **Engagement Agent**: 댓글과 답글 반응을 5가지 범주(공감, 질문, 반박, 경험공유, 무반응)로 파싱하여 다음 콘텐츠 기획 소재로 피드백합니다.
+5. **Self-Healing Agent**: 토큰 만료, API 제한(429), 파싱 오류 및 톤 이탈을 실시간 감지하여 자동 백오프 리트라이 및 에스컬레이션을 처리합니다.
+6. **Telegram Interface**: `/status`, `/report`, `/retry`, `/pause` 등의 명령을 처리하고 상태를 회신합니다.
+7. **Spreadsheet Reporter**: 매일 아침 9시, 전날의 총 게시 수, 반응 지표 및 실패 건수를 구글 시트에 일일 보고서로 자동 기록합니다.
+
+---
+
+## 🔄 3. 운영 라이프사이클 및 8대 상태 기계
+
+```
+[주제 생성] ➡️ [Threads 훅 포스트] ➡️ [인스타 7장 카드뉴스 가공] ➡️ [자동 렌더링] ➡️ [교차 발행 및 피드백]
+```
+
+각 콘텐츠 컨테이너는 아래 8가지 상태값을 가지며, 시스템 상태 파일(`agent_runs/agent_status.md` 및 `manifest.json`)에 영구 기록됩니다.
+* **`draft`**: 에이전트가 텍스트 및 이미지를 생성한 최초 임시 상태.
+* **`approved`**: 텔레그램/대시보드를 통해 사용자가 승인 처리를 완료한 상태 (수동 게이트).
+* **`scheduled`**: 업로드 예약 시각이 지정되어 퍼블리셔 큐에서 대기 중인 상태.
+* **`published`**: API 업로드가 최종 완료된 상태.
+* **`failed`**: API 오류나 타임아웃 한계 초과로 영구 실패 처리된 상태.
+* **`recovering`**: 자기치유 모듈이 1차 백오프 리트라이 또는 프롬프트 단순화를 적용 중인 상태.
+* **`recycle_candidate`**: 성과 점수가 기준치(130%)를 초과하여 차주 기획 최우선 소재로 분류된 상태.
+* **`escalated`**: API 한도 제한 등으로 인해 사람의 직접 수동 조치 승인을 홀드 대기 중인 상태.
+
+---
+
+## 🛡️ 4. 연동 운영 및 드리프트 가드 (Drift Guard)
+
+1. **중복 복사 금지**: Threads(대화형 구어체)와 Instagram(단정형 명조체)은 플랫폼별 성향에 맞춰 어투와 캡션 형식을 철저히 분리하며, 동일한 텍스트를 그대로 복사하여 붙여넣지 않습니다.
+2. **소통 SLA 준수**: Threads 포스트 업로드 후 **최초 6시간 이내**에 달린 상위 5개의 피드백 댓글에는 알고리즘 보상을 위해 반드시 답글 피드백을 완료합니다.
+3. **승인 게이트 보존**: 렌더링 카드 가독성 검수 및 텍스트 훅의 톤앤매너 1차 검수는 반드시 인간 관리자가 직접 검토하여 게시물 오염을 방지합니다.
+
+---
+
+## 📈 5. Threads 테스트 업로드 빈도 제어 및 반응 조율 (Growth Hack)
+
+초기 업로드 시 계정의 도달률 급감(Shadow Ban) 및 반응 분산을 방지하고 데이터 기반으로 점진적으로 채널을 확장하는 지침입니다.
+
+### 1) 빈도 조절 원칙 (Frequency Control Steps)
+* **초기 1~2일차 (Warm-Up 단계)**:
+  - 하루 업로드 빈도를 **3~4회**로 극도 제한합니다. (최소 6~8시간의 간격 유지)
+  - `.env` 파일 내 `PIPELINE_INTERVAL_SECONDS=21600` 설정을 통해 6시간 주기로 스케줄러를 제한 가동합니다.
+* **3일차 이후 (Scalability 단계)**:
+  - 초기 반응 지표(좋아요, 댓글 수)가 최근 게시물 평균의 100% 이상을 유지할 경우, 점진적으로 주기를 좁혀 **최종 3시간 간격(`PIPELINE_INTERVAL_SECONDS=10800`)** 업로드 파이프라인으로 확대합니다.
+* **도달률 저하 시 (Cool-Down 단계)**:
+  - 도달률(노출수) 및 반응 지표가 연속 3회 이상 하락세를 보일 경우, 즉시 업로드 빈도를 다시 하루 3~4회 수준으로 낮추고, RAG 분석을 통해 콘텐츠 품질과 첫 장 훅의 카피라이팅 개선 작업을 선행합니다.
+
+### 2) 3단계 성과 보고 체계
+* **1차 보고 (게시 직후)**: `post_id`, `permalink`, `게시 시각`을 텔레그램으로 즉시 알림 발송.
+* **2차 보고 (게시 24시간 뒤)**: `조회수`, `좋아요 수`, `댓글 수`, `리포스트/인용 수`, `프로필 유입/팔로우 증가 여부`를 텔레그램 요약 발송.
+* **3차 최종 보고 (게시 72시간 뒤)**: 72시간 누적 지표 종합 및 피드백 루프 조율 (계정 5회 평균치와 비교 분석하여 업로드 간격 및 차기 RAG 훅 어조 수위 동적 조정).
+
+---
+
+## 🚨 6. 장애 대응 및 자가 치유(Self-Healing)
+
+* **토큰 만료 (HTTP 401)**: `Short-Lived` 토큰 만료 전 `instagram_token_manager.py`를 통한 30일 주기 자동 연장 검증. Threads 전용 사용자 토큰(`THREADS_ACCESS_TOKEN`)은 만료 전 개발자 콘솔을 통해 수동 갱신 후 `.env`에 이식.
+* **API 차단 및 Rate Limit (HTTP 429)**: 인스타그램 Action Blocked 감지 시 즉시 `instagram_publish_cooldown.json` 파일을 기록하고 **24시간 강제 쿨다운 진입**.
+* **자가 치유 임계치 초과**: 자가 치유 에이전트가 프롬프트 자동 조정을 2회 시도했음에도 품질 미달 혹은 발행 오류가 지속될 시, 상태를 즉시 `escalated`로 전환하고 **무인 발행을 전면 홀딩(Hold)**한 뒤 텔레그램으로 인간 관리자 개입 알림을 발송.
+
+---
+
+## 🧪 7. QA 검증 및 유지관리
+
+* **[ ] 정적 코드 안전 진단**: 코드 수정 직후 사전 정적 분석 검사 실행.
+  ```bash
+  ./scripts/qa_checks.sh
+  ```
+  (단 하나의 단계라도 FAILED될 경우 릴리즈 불가)
+* **[ ] E2E 무발행(Safe) 테스트 검증**: 실제 인스타그램/Threads API 전송을 스킵하고 전체 생성, RAG 임베딩 및 카드뉴스 렌더링 정상 여부만 시뮬레이션 검증.
+  ```bash
+  python3 codex_e2e_check.py
+  ```
+  (`agent_runs/codex_e2e_check_report.json`에서 `"ok": true` 확인 필요)
+
+---
+
+## 📁 8. 리포지토리 디렉터리 레이아웃
+
+```
+.
+├── README.md               # 시스템 마스터 매뉴얼
+├── config/                 # 공개 가능한 전략/정책 JSON
+├── docs/                   # 상세 스펙 및 규칙 폴더
+│   ├── runbook.md          # 장애 대응 및 수동 조치 런북
+│   ├── PUBLIC_RELEASE_CHECKLIST.md # GitHub 공개 전 점검표
+│   └── THREADS_INSTAGRAM_RULES.md # 플랫폼 연동 규칙 지침
+├── ops/launch_agents/      # 개인정보 없는 LaunchAgent 예시
+├── scripts/                # 관리용 쉘 스크립트 폴더
+│   └── qa_checks.sh        # 정적 QA 진단 도구
+├── prompts/                # Antigravity/Codex 단계별 프롬프트
+├── samples/                # 공개 가능한 JSON 샘플
+├── static/, templates/     # 대시보드 UI
+├── agent_runs/             # 로컬 상태 캐시, Git 제외
+├── logs/                   # 로컬 로그, Git 제외
+├── obsidian_vault/         # 로컬 Obsidian 지식 베이스, Git 제외
+├── main_orchestrator.py    # 통합 오케스트레이션 루프 엔진
+├── upload_carousel.py      # Instagram API 업로더
+├── self_healing_generator.py # 자가 치유형 대본 생성기
+├── telegram_agent.py       # Telegram 인터페이스봇
+└── google_sheet_manager.py # Google Sheets 리포터
+```
+
+---
+
+## 🔑 9. 환경 변수 설정 가이드 (.env)
+
+시스템 구동을 위해 리포지토리 루트의 `.env` 파일에 아래 환경 변수를 명확히 선언해야 합니다.
+
+의존성은 아래처럼 설치합니다.
+
 ```bash
-pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+python3 -m pip install -r requirements.txt
 ```
 
-### 📝 자동 백업 파이썬 코드 예시 (`backup_to_drive.py`)
-```python
-import os
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.service_account import Credentials
+```env
+# Meta Graph API Credentials
+INSTAGRAM_ACCESS_TOKEN=your_instagram_access_token
+INSTAGRAM_ACCOUNT_ID=your_instagram_account_id
+THREADS_ACCESS_TOKEN=your_threads_access_token
 
-# 구글 드라이브 API 범위 설정
-SCOPES = ['https://www.googleapis.com/auth/drive']
-KEY_FILE_PATH = 'google_creds.json'  # 서비스 계정 키 파일 경로
-PARENT_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID'  # 백업 대상 드라이브 폴더 ID
+# Telegram System
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+TELEGRAM_NOTIFICATIONS_ENABLED=true
+TELEGRAM_REPORT_MUTED=true
 
-def get_drive_service():
-    creds = Credentials.from_service_account_file(KEY_FILE_PATH, scopes=SCOPES)
-    return build('drive', 'v3', credentials=creds)
-
-def upload_file_to_drive(file_path):
-    if not os.path.exists(file_path):
-        print(f"[Error] 백업 대상 파일이 존재하지 않습니다: {file_path}")
-        return None
-
-    service = get_drive_service()
-    file_name = os.path.basename(file_path)
-    
-    file_metadata = {
-        'name': file_name,
-        'parents': [PARENT_FOLDER_ID]
-    }
-    media = MediaFileUpload(file_path, mimetype='image/png')
-    
-    try:
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        print(f"✅ 구글 드라이브 백업 완료: {file_name} (File ID: {file.get('id')})")
-        return file.get('id')
-    except Exception as e:
-        print(f"❌ 구글 드라이브 업로드 실패 ({file_name}): {e}")
-        return None
-
-if __name__ == '__main__':
-    # 업로드 성공 후 로컬 이미지 백업 예시
-    for i in range(1, 6):
-        upload_file_to_drive(f"page{i}.png")
+# Google Drive & Sheets System
+GOOGLE_DRIVE_PARENT_FOLDER_ID=your_google_drive_folder_id
+PIPELINE_INTERVAL_SECONDS=21600 # 초기 2일간 6시간 주기 제한 설정
 ```
-
----
-
-## 2. 자기치유 시스템 백서 (Runbook)
-
-무인 자동화 공장이 중단되지 않고 예외 발생 시 스스로 회복하거나 관리자에게 긴급 대응을 알리는 지침서입니다.
-
-### 🚨 트러블슈팅 및 비상 대처 매뉴얼
-
-#### 1) Meta API 토큰 만료 (OAuth Exception - Error 190)
-*   **증상**: `Error 190: Access token has expired` 메시지와 함께 업로드 스크립트 중단.
-*   **원인**: 단기 토큰(2시간) 또는 장기 토큰(60일) 만료.
-*   **자가 치유 및 조치 방법**:
-    1. **단기 토큰 리프레시**: 관리자가 직접 [Meta Graph API 탐색기](https://developers.facebook.com/tools/explorer/)에서 새로 발급받아야 합니다.
-    2. **장기 토큰으로의 자동 전환**: 아래 엔드포인트를 통해 장기 토큰(60일 만료)을 생성해 등록해 둡니다.
-       ```bash
-       curl -X GET "https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app-id}&client_secret={app-secret}&fb_exchange_token={short-lived-token}"
-       ```
-    3. **자동화 알림**: 스크립트 실행 실패 감지 시 즉시 슬랙/디스코드 웹훅으로 경고를 발송합니다.
-
-#### 2) 이미지 URL 오류 (Invalid URL / Download Failed - Error 100)
-*   **증상**: `is_carousel_item` 생성 시 `Invalid URL` 혹은 `Failed to download image` 오류 발생.
-*   **원인**: ngrok 주소 만료, Imgur 업로드 실패, 혹은 외부 이미지 호스팅 도메인의 일시적 에러.
-*   **자가 치유 및 조치 방법**:
-    1. **스마트 재시도 (Backoff)**: `upload_carousel.py` 내부에 `time.sleep` 대기 시간을 2배씩 늘리며 최대 3회 재시도(Exponential Backoff)하는 로직을 구동합니다.
-    2. **ngrok 상태 체크**: 로컬 호스팅을 쓸 경우 `curl http://localhost:4040/api/tunnels` 명령을 쉘 스크립트에서 사전 가동하여 ngrok 터널이 유효한지 자동 검증하고, 만료되었을 시 ngrok 서비스를 자동 백그라운드 재시작합니다.
-
-#### 3) 생성 지연 및 업로드 누락 (Timeout)
-*   **증상**: 시스템 스케줄 크론은 돌았으나 안티그래비티 이미지 생성 완료가 늦어져 `page1.png` 등이 채 갖춰지기 전에 업로더가 실행됨.
-*   **자가 치유 및 조치 방법**:
-    1. **Pre-check 파일 검사**: `upload_carousel.py` 실행 직후 1~5장의 로컬 파일이 온전히 존재하는지 검사하고, 부재할 시 **최대 10분 동안 1분 주기로 대기**하며 완성을 기다리는 대기 루프를 활용합니다.
-
----
-
-### 📲 관리자 긴급 알림 연동 (Slack Webhook)
-스크립트 에러 발생 시 관리자 스마트폰으로 즉시 디버깅 정보를 전송하는 데코레이터 예시입니다:
-
-```python
-import requests
-
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
-
-def send_slack_alert(error_message):
-    payload = {
-        "text": f"🚨 [MindFactory Alert] 자동 업로드 파이프라인 장애 발생!\n*상세 정보*: `{error_message}`"
-    }
-    try:
-        requests.post(SLACK_WEBHOOK_URL, json=payload)
-    except Exception as e:
-        print(f"슬랙 알림 발송 실패: {e}")
-```
-이 런북 및 백업 인프라를 상시 참조하여 24시간 안정적인 시스템 운영을 지속하시기 바랍니다.

@@ -1,0 +1,14 @@
+{
+  "job_id": "job_20260527_220100_001",
+  "result": "ready_for_manual_review",
+  "published": false,
+  "scheduled_time": "2026-05-28T20:30:00+09:00",
+  "cooldown_until": null,
+  "final_notes": [
+    "콘텐츠 제작 완료",
+    "품질 게이트 통과",
+    "비주얼 플랜 완료",
+    "게시 전 사람 검토 필요"
+  ],
+  "updated_at": "2026-05-27T22:18:00+09:00"
+}

@@ -3,7 +3,6 @@ import json
 import time
 import requests
 from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont
 from dotenv import load_dotenv
 
 # 환경 변수 로드
@@ -17,7 +16,7 @@ import gspread
 
 # import upload_carousel module directly for seamless programmatic call
 import upload_carousel
-from image_generator import generate_background_images
+from card_renderer import generate_card_news_images
 from audience_research import create_audience_insight
 from content_strategy import create_content_strategy
 from content_evaluator import evaluate_script_quality
@@ -28,50 +27,65 @@ from agent_monitor import (
     update_pipeline,
     write_human_summary,
 )
+from telegram_agent import (
+    process_telegram_commands,
+    send_telegram_message,
+)
+
+
+def sync_publish_reports_to_obsidian():
+    try:
+        from obsidian_publish_sync import sync_all_publish_reports
+        results = sync_all_publish_reports()
+        if results:
+            print(f"[Obsidian Sync] 발행 데이터 {len(results)}건을 지식 베이스와 동기화했습니다.")
+    except Exception as exc:
+        print(f"[Warning] Obsidian 발행 데이터 동기화 실패: {exc}")
 
 def search_and_save_trends(vault_path):
-    """DuckDuckGo를 통해 인스타그램 알고리즘 및 트렌드를 서치하여 옵시디언 폴더에 md로 누적 저장"""
-    # 실제 vault_path가 없으면 임시 obsidian_vault 사용
+    """Antigravity CLI 검색으로 트렌드 조사 결과를 옵시디언 폴더에 저장"""
     if not os.path.exists(vault_path):
         vault_path = os.path.join(os.getcwd(), "obsidian_vault")
     os.makedirs(vault_path, exist_ok=True)
-    
-    from duckduckgo_search import DDGS
+
     queries = [
         "instagram algorithm changes tips 2026",
-        "instagram carousel layout design trends"
+        "instagram carousel layout design trends",
+        "Korean young adults burnout anxiety motivation social media trend",
+        "Instagram carousel storytelling hook save share strategy",
     ]
-    
-    md_content = f"# 실시간 인스타그램 마케팅 트렌드 보고서 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n"
-    md_content += "인스타그램 알고리즘 및 레이아웃 트렌드 실시간 검색 요약 데이터입니다. 이 내용을 카드뉴스 기획 및 카피라이팅 시 참고하십시오.\n\n"
-    
-    print("  - 트렌드 검색 시작...")
+
+    md_content = f"# Antigravity Trend Search Request ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n\n"
+    md_content += "아래 항목은 Antigravity CLI 검색/추론으로 조사하기 위한 요청입니다.\n\n"
+    md_content += "## 요청\n"
+    md_content += "- 요즘 사람들이 실제로 어떤 삶의 압박, 번아웃, 불안, 동기 저하를 겪는지 조사\n"
+    md_content += "- 인스타그램 카드뉴스에서 저장/공유를 유도하는 최신 후킹과 스토리텔링 패턴 조사\n"
+    md_content += "- 조사 결과를 다음 대본 생성과 전략 설계에 반영할 수 있게 요약\n\n"
+    md_content += "## 검색 쿼리\n"
+    for query in queries:
+        md_content += f"- {query}\n"
+    md_content += "\n## Antigravity 응답 작성 위치\n"
+    md_content += "Antigravity CLI가 이 요청을 처리해 같은 파일에 검색 결과 Markdown을 저장합니다.\n"
+
     try:
-        with DDGS() as ddgs:
-            for q in queries:
-                md_content += f"## 검색 키워드: {q}\n"
-                try:
-                    results = list(ddgs.text(q, max_results=4))
-                    for idx, r in enumerate(results, start=1):
-                        title = r.get("title", "No Title")
-                        body = r.get("body", "No Content")
-                        href = r.get("href", "No Link")
-                        md_content += f"### {idx}. {title}\n"
-                        md_content += f"- **내용**: {body}\n"
-                        md_content += f"- **출처**: [{href}]({href})\n\n"
-                except Exception as q_err:
-                    print(f"    [Warning] 쿼리 '{q}' 검색 실패: {q_err}")
-                    md_content += f"*(검색 결과 획득 실패)*\n\n"
-        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"trend_search_{timestamp}.md"
         filepath = os.path.join(vault_path, filename)
-        
+
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(md_content)
-        print(f"✅ 최신 인스타 트렌드 학습 파일 저장 완료: {filepath}")
+
+        try:
+            from antigravity_bridge import run_search_task
+            search_result = run_search_task(md_content, filepath, request_path=filepath)
+            if search_result:
+                print(f"✅ Antigravity 검색 결과 저장 완료: {filepath}")
+            else:
+                print(f"✅ Antigravity 검색 요청 파일 저장 완료: {filepath}")
+        except Exception as search_exc:
+            print(f"[Warning] Antigravity 검색 실행 실패, 요청 파일만 보존합니다: {search_exc}")
     except Exception as e:
-        print(f"[Warning] DuckDuckGo 검색 도중 오류 발생 (스킵): {e}")
+        print(f"[Warning] 트렌드 조사 요청 파일 생성 실패: {e}")
 
 # =====================================================================
 # [설정 변수]
@@ -83,32 +97,18 @@ API_VERSION = os.getenv("INSTAGRAM_API_VERSION", "v19.0")
 CREDS_FILE = "google_creds.json"
 SHEET_NAME = "MindFactory_SNS_Dashboard"
 
-# Fallback background images setup (dynamic check)
-_BRAIN_PATH = "/Users/seongjegeun/.gemini/antigravity-ide/brain/cf2259fb-555a-411c-8719-235026f58f52"
-BACKGROUND_IMAGES = [
-    os.path.join(_BRAIN_PATH, f"page{i}_bg_1779811878358.png") if i == 1 else
-    os.path.join(_BRAIN_PATH, f"page{i}_bg_1779811898677.png") if i == 2 else
-    os.path.join(_BRAIN_PATH, f"page{i}_bg_1779811918374.png") if i == 3 else
-    os.path.join(_BRAIN_PATH, f"page{i}_bg_1779811936436.png") if i == 4 else
-    os.path.join(_BRAIN_PATH, f"page{i}_bg_1779811956257.png")
-    for i in range(1, 6)
-]
-
-FONT_PATH = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
-if not os.path.exists(FONT_PATH):
-    FONT_PATH = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
-
 # =====================================================================
 # A. 주차(W) 및 월차(M) 자동 계산
 # =====================================================================
 def get_start_date():
-    start_file = "start_date.txt"
+    start_file = "agent_runs/start_date.txt"
     if os.path.exists(start_file):
         with open(start_file, "r") as f:
             date_str = f.read().strip()
             return datetime.strptime(date_str, "%Y-%m-%d")
     else:
         today = datetime.now()
+        os.makedirs("agent_runs", exist_ok=True)
         with open(start_file, "w") as f:
             f.write(today.strftime("%Y-%m-%d"))
         return today
@@ -117,10 +117,10 @@ def get_current_periods():
     start_date = get_start_date()
     today = datetime.now()
     days_elapsed = (today - start_date).days
-    
+
     week_num = (days_elapsed // 7) + 1
     month_num = (days_elapsed // 30) + 1
-    
+
     return f"W{week_num}", f"M{month_num}"
 
 # =====================================================================
@@ -132,7 +132,7 @@ def get_google_services():
         "https://www.googleapis.com/auth/drive"
     ]
     creds = None
-    
+
     # 1. token.json (User Credentials) 우선 시도
     if os.path.exists("token.json"):
         from google.oauth2.credentials import Credentials as UserCredentials
@@ -141,7 +141,7 @@ def get_google_services():
             print("[Info] 'token.json' 사용자 계정 인증 정보를 사용하여 구글 서비스에 연결합니다.")
         except Exception as e:
             print(f"[Warning] token.json 로드 중 예외: {e}")
-            
+
     # 2. google_creds.json (Service Account) 차선 시도
     if not creds and os.path.exists(CREDS_FILE):
         try:
@@ -149,38 +149,38 @@ def get_google_services():
             print("[Info] 'google_creds.json' 서비스 계정 자격 증명을 사용하여 구글 서비스에 연결합니다.")
         except Exception as e:
             print(f"[Warning] google_creds.json 로드 중 예외: {e}")
-            
+
     if not creds:
         print("[Warning] 구글 자격 증명 파일(token.json 또는 google_creds.json)이 존재하지 않아 시뮬레이션 모드로 실행합니다.")
         return None, None, None
-        
+
     drive_service = build("drive", "v3", credentials=creds)
     docs_service = build("docs", "v1", credentials=creds)
     gspread_client = gspread.authorize(creds)
-    
+
     return drive_service, docs_service, gspread_client
 
 def get_or_create_drive_folder(drive_service, name, parent_id=None):
     if not drive_service:
         return "mock_folder_id"
-        
+
     query = f"name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
     if parent_id:
         query += f" and '{parent_id}' in parents"
-        
+
     results = drive_service.files().list(q=query, fields="files(id, name)").execute()
     files = results.get("files", [])
-    
+
     if files:
         return files[0]["id"]
-        
+
     file_metadata = {
         "name": name,
         "mimeType": "application/vnd.google-apps.folder"
     }
     if parent_id:
         file_metadata["parents"] = [parent_id]
-        
+
     folder = drive_service.files().create(body=file_metadata, fields="id").execute()
     print(f"📁 구글 드라이브 폴더 생성 완료: {name} (ID: {folder.get('id')})")
     return folder.get("id")
@@ -214,27 +214,27 @@ def get_sheet_and_ensure_tab(gspread_client, drive_service, folder_id):
 def check_last_post_performance(worksheet):
     if not worksheet:
         return False, None, None, 0
-        
+
     records = worksheet.get_all_records()
     if not records:
         return False, None, None, 0
-        
+
     last_record = records[-1]
     media_id = last_record.get("미디어ID")
     title = last_record.get("타이틀", "")
     content = last_record.get("본문내용", "")
-    
+
     if not media_id:
         return False, None, None, 0
-        
+
     print(f"[Info] 직전 업로드 미디어 (ID: {media_id}) 성과 확인 중...")
-    
+
     insights_url = f"https://graph.facebook.com/{API_VERSION}/{media_id}/insights"
     insights_params = {
         "metric": "impressions",
         "access_token": ACCESS_TOKEN
     }
-    
+
     impressions = 0
     try:
         res = requests.get(insights_url, params=insights_params, timeout=8)
@@ -246,7 +246,7 @@ def check_last_post_performance(worksheet):
             print(f"  - 조회수 획득 실패 (미등록 또는 API 에러): {res_data}")
     except Exception as e:
         print(f"  - 조회수 API 확인 중 예외 발생: {e}")
-        
+
     if impressions < 100:
         print("⚠️ [자기치유 발동] 직전 피드의 조회수 성과가 극도로 저조합니다. 다음 기획에 비주얼 및 카피 다각화를 명령합니다.")
         return True, title, content, impressions
@@ -254,26 +254,14 @@ def check_last_post_performance(worksheet):
 
 
 def analyze_and_generate_strategy(last_title, last_content, impressions):
-    """직전 포스팅 성과가 저조할 경우 DuckDuckGo 실시간 검색 및 LLM 분석을 결합하여 자가치유 전략 수립"""
+    """직전 포스팅 성과가 저조할 경우 Antigravity 전략 요청으로 저장"""
     print(f"\n🧠 [자가치유 분화] 직전 포스팅('{last_title}', 조회수: {impressions}회) 성과 분석 및 전략 수립 중...")
-    
-    from duckduckgo_search import DDGS
-    search_results = ""
-    try:
-        with DDGS() as ddgs:
-            query = "instagram carousel layout copy tips increase impressions reach"
-            results = list(ddgs.text(query, max_results=3))
-            for idx, r in enumerate(results, start=1):
-                search_results += f"- {r.get('title')}: {r.get('body')}\n"
-    except Exception as e:
-        print(f"  [Warning] 자가치유용 구글 서치 실패: {e}")
-        search_results = "실시간 검색 실패 (로컬 지식 기반 진행)"
 
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_key:
-        print("  [Warning] GEMINI_API_KEY가 없어 자가치유 분석을 건너뜜.")
-        return
-        
+    search_results = (
+        "외부 검색 API를 직접 호출하지 않습니다. "
+        "Antigravity CLI 검색으로 인스타그램 카드뉴스 성과 개선 자료를 조사해 주세요."
+    )
+
     prompt = f"""너는 인스타그램 마케팅 분석가이자 마인드팩토리의 수석 전략가야.
 직전에 발행한 카드뉴스의 성과가 매우 저조해(조회수: {impressions}회). 이 현상을 타개하기 위한 정밀 진단 및 피드백 지침을 만들어줘.
 
@@ -295,241 +283,37 @@ def analyze_and_generate_strategy(last_title, last_content, impressions):
   "prompt_injection": "다음 카드뉴스 대본 생성 AI에게 강제로 주입할 구체적인 디자인 및 카피 지시문 (예: '이번에는 Cream 배경에 Muted Blue 선을 극도로 절제해 쓰고, 헤드라인을 [~하는 짓은 당장 멈춰라] 식의 극약 처방 어조로 써라')"
 }}
 """
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "responseMimeType": "application/json"
+    from codex_text_bridge import read_json_response, write_strategy_request
+    strategy_data = write_strategy_request(prompt) or read_json_response("codex_strategy_response.json")
+    if not strategy_data:
+        strategy_data = {
+            "analysis": "Antigravity 전략 응답 파일이 아직 없어 로컬 규칙으로 보수 판단합니다.",
+            "action_items": "1장 훅은 독자의 현재 고통을 더 구체화하고, 중간 장에는 바로 실행 가능한 3단계 행동을 넣고, 마지막 장은 저장 이유가 분명한 체크리스트로 구성합니다.",
+            "prompt_injection": "이번 카드뉴스는 공감형 후킹, 3단계 실천 요약, 저장용 체크리스트를 반드시 포함하고 자극적인 색과 과한 훈계톤을 피한다.",
         }
-    }
-    
-    strategy_file = "self_healing_strategy.json"
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=25)
-        if res.status_code == 200:
-            res_data = res.json()
-            raw_text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            
-            # JSON 검증 및 클리닝
-            if raw_text.startswith("```json"):
-                raw_text = raw_text[7:]
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
-            raw_text = raw_text.strip()
-            
-            # 파일 저장
-            with open(strategy_file, "w", encoding="utf-8") as f:
-                f.write(raw_text)
-            print(f"✅ 자가치유 전략 보고서 생성 및 저장 완료: {strategy_file}")
-        else:
-            print(f"  [Warning] Gemini API 호출 실패 (상태 코드: {res.status_code})")
-    except Exception as e:
-        print(f"  [Warning] 자가치유 피드백 생성 도중 오류 발생: {e}")
+
+    with open("self_healing_strategy.json", "w", encoding="utf-8") as f:
+        json.dump(strategy_data, f, ensure_ascii=False, indent=2)
+    print("✅ Antigravity 중심 자가치유 전략 파일 저장 완료: self_healing_strategy.json")
 
 # =====================================================================
 # E. 자기치유 기반 대본 기획
 # =====================================================================
 def run_generator_script(diversify=False):
     print("\n[Step 1] 대본 자동 기획 가동...")
-    previous_value = os.environ.get("FORCE_DIVERSIFICATION")
+    import subprocess
+    env = os.environ.copy()
     if diversify:
-        os.environ["FORCE_DIVERSIFICATION"] = "True"
+        env["FORCE_DIVERSIFICATION"] = "True"
     try:
-        from self_healing_generator import main as generate_script
-        generate_script()
-    except SystemExit as e:
-        if e.code not in (0, None):
-            print("[Warning] 대본 생성 모듈 실행 중 경고 감지.")
-    finally:
-        if previous_value is None:
-            os.environ.pop("FORCE_DIVERSIFICATION", None)
-        else:
-            os.environ["FORCE_DIVERSIFICATION"] = previous_value
-
-# =====================================================================
-# F. 이미지 생성 및 텍스트 합성
-# =====================================================================
-def wrap_text(text, font, max_width, draw):
-    """지정된 너비를 넘지 않도록 텍스트를 줄바꿈하여 리스트로 반환"""
-    words = text.split(" ")
-    lines = []
-    current_line = []
-    
-    for word in words:
-        current_line.append(word)
-        test_line = " ".join(current_line)
-        bbox = draw.textbbox((0, 0), test_line, font=font)
-        w = bbox[2] - bbox[0]
-        if w > max_width:
-            current_line.pop()
-            lines.append(" ".join(current_line))
-            current_line = [word]
-            
-    if current_line:
-        lines.append(" ".join(current_line))
-    return lines
-
-def generate_card_news_images():
-    print("[Step 2] 카드뉴스 이미지 가변 합성 (Sophisticated Storytelling)...")
-    script_file = "script.json"
-    if not os.path.exists(script_file):
-        print("[Error] script.json 파일이 존재하지 않아 이미지 합성이 불가합니다.")
-        return False
-        
-    try:
-        with open(script_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        pages = data.get("pages", [])
-        generated_backgrounds = generate_background_images(data)
-        
-        # 폰트 경로 로드
-        sans_font_path = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
-        if not os.path.exists(sans_font_path):
-            sans_font_path = "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"
-            
-        serif_font_path = "/System/Library/Fonts/Supplemental/AppleMyungjo.ttf"
-        if not os.path.exists(serif_font_path):
-            serif_font_path = "/System/Library/Fonts/Supplemental/Times New Roman.ttf"
-            
-        for i, page in enumerate(pages):
-            theme = page.get("theme_color", "deep_navy").lower()
-            heading_text = page.get("heading", "")
-            sub_text = page.get("sub_text", "")
-            
-            width, height = 1080, 1080
-            
-            # 테마별 색상 정의 (Sophisticated Storytelling 컬러 팔레트)
-            if theme == "cream":
-                bg_color = (248, 250, 240, 255) # Cream (#F8FAF0)
-                head_color = (15, 23, 42, 255)   # Charcoal (#0F172A)
-                sub_color = (71, 85, 105, 255)   # Slate Gray (#475569)
-                accent_color = (29, 78, 216, 255) # Muted Blue (#1D4ED8)
-            elif theme == "slate_gray":
-                bg_color = (51, 65, 85, 255)    # Slate Gray (#334155)
-                head_color = (248, 250, 240, 255) # Cream (#F8FAF0)
-                sub_color = (148, 163, 184, 255) # Muted Gray (#94A3B8)
-                accent_color = (212, 175, 55, 255) # Muted Gold (#D4AF37)
-            else: # deep_navy
-                bg_color = (15, 23, 42, 255)     # Deep Navy (#0F172A)
-                head_color = (248, 250, 240, 255) # Cream (#F8FAF0)
-                sub_color = (148, 163, 184, 255) # Muted Gray (#94A3B8)
-                accent_color = (212, 175, 55, 255) # Muted Gold (#D4AF37)
-                
-            img = Image.new("RGBA", (width, height), bg_color)
-            draw = ImageDraw.Draw(img)
-            
-            # 대본의 image_prompt로 새로 만든 배경을 우선 사용하고, 실패 시 기존 고정 배경으로 폴백
-            bg_path = None
-            blend_strength = 0.38
-            if i < len(generated_backgrounds) and os.path.exists(generated_backgrounds[i]):
-                bg_path = generated_backgrounds[i]
-            elif i < len(BACKGROUND_IMAGES) and os.path.exists(BACKGROUND_IMAGES[i]):
-                bg_path = BACKGROUND_IMAGES[i]
-                blend_strength = 0.12
-
-            if bg_path:
-                try:
-                    bg_img = Image.open(bg_path).convert("RGBA")
-                    bg_img = bg_img.resize((width, height))
-                    bg_img_gray = bg_img.convert("L").convert("RGBA")
-                    img = Image.blend(img, bg_img_gray, blend_strength)
-                    draw = ImageDraw.Draw(img)
-                except Exception as e:
-                    print(f"    [Warning] 배경 스톡 오버레이 적용 실패: {e}")
-            
-            # 미니멀한 뮤티드/골드 테두리 프레임
-            frame_margin = 45
-            draw.rectangle(
-                [frame_margin, frame_margin, width - frame_margin, height - frame_margin],
-                outline=accent_color if theme == "cream" else (accent_color[0], accent_color[1], accent_color[2], 80),
-                width=2
-            )
-            
-            # 폰트 로드
-            try:
-                head_font = ImageFont.truetype(serif_font_path, 54, index=0)
-            except Exception:
-                try:
-                    head_font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Georgia.ttf", 52)
-                except Exception:
-                    head_font = ImageFont.load_default()
-                    
-            try:
-                sub_font = ImageFont.truetype(sans_font_path, 32, index=0)
-            except Exception:
-                try:
-                    sub_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 30)
-                except Exception:
-                    sub_font = ImageFont.load_default()
-            
-            max_text_width = width - (frame_margin * 4)
-            
-            head_lines = wrap_text(heading_text, head_font, max_text_width, draw)
-            sub_lines = wrap_text(sub_text, sub_font, max_text_width, draw)
-            
-            head_line_heights = []
-            total_head_height = 0
-            for line in head_lines:
-                bbox = draw.textbbox((0, 0), line, font=head_font)
-                lh = bbox[3] - bbox[1]
-                head_line_heights.append(lh)
-                total_head_height += lh
-            total_head_height += (len(head_lines) - 1) * 15
-            
-            sub_line_heights = []
-            total_sub_height = 0
-            for line in sub_lines:
-                bbox = draw.textbbox((0, 0), line, font=sub_font)
-                lh = bbox[3] - bbox[1]
-                sub_line_heights.append(lh)
-                total_sub_height += lh
-            total_sub_height += (len(sub_lines) - 1) * 12
-            
-            divider_space = 50
-            total_content_height = total_head_height + divider_space + total_sub_height
-            
-            y_start = (height - total_content_height) // 2
-            
-            # 1. 헤드라인(명조체) 그리기
-            current_y = y_start
-            for idx, line in enumerate(head_lines):
-                bbox = draw.textbbox((0, 0), line, font=head_font)
-                line_w = bbox[2] - bbox[0]
-                x_pos = (width - line_w) // 2
-                draw.text((x_pos, current_y), line, font=head_font, fill=head_color)
-                current_y += head_line_heights[idx] + 15
-                
-            # 2. 미니멀 디바이더 라인(가로선) 그리기
-            current_y += 10
-            line_y = current_y + 10
-            line_length = 120
-            draw.line(
-                [(width - line_length) // 2, line_y, (width + line_length) // 2, line_y],
-                fill=accent_color,
-                width=3
-            )
-            current_y += divider_space - 10
-            
-            # 3. 서브텍스트(고딕체) 그리기
-            for idx, line in enumerate(sub_lines):
-                bbox = draw.textbbox((0, 0), line, font=sub_font)
-                line_w = bbox[2] - bbox[0]
-                x_pos = (width - line_w) // 2
-                draw.text((x_pos, current_y), line, font=sub_font, fill=sub_color)
-                current_y += sub_line_heights[idx] + 12
-                
-            output_path = f"page{i+1}.png"
-            img.convert("RGB").save(output_path, "PNG")
-            print(f"  - 이미지 합성 완료 (테마: {theme}): {output_path}")
-        return True
+        # subprocess로 완전히 고립된 프로세스로 구동시켜 PyTorch/Torch 스레드 데드락 현상을 원천 차단합니다.
+        subprocess.run(
+            ["python3", "self_healing_generator.py"],
+            env=env,
+            check=True
+        )
     except Exception as e:
-        print(f"[Error] 카드뉴스 이미지 합성 실패: {e}")
-        return False
+        print(f"[Warning] 대본 생성 모듈 실행 중 예외 감지: {e}")
 
 # =====================================================================
 # G. 구글 드라이브 임시 호스팅 & 릴리즈 & 클리닝
@@ -538,14 +322,14 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
     """구글 드라이브에 임시 이미지 업로드 및 퍼블릭 읽기 권한을 주어 직접 다운로드 링크 생성"""
     if not drive_service:
         return "mock_id", f"https://example.com/{os.path.basename(file_path)}"
-        
+
     file_name = os.path.basename(file_path)
     file_metadata = {
         "name": file_name,
         "parents": [folder_id]
     }
     media = MediaFileUpload(file_path, mimetype='image/png')
-    
+
     try:
         # 1. 파일 임시 생성
         file = drive_service.files().create(
@@ -554,7 +338,7 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
             fields='id'
         ).execute()
         file_id = file.get('id')
-        
+
         # 2. 링크 권한을 '모든 사용자(Anyone)'에게 부여
         permission = {
             'role': 'reader',
@@ -564,7 +348,7 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
             fileId=file_id,
             body=permission
         ).execute()
-        
+
         # 3. 직접 다운로드 302 리디렉션 주소 조립
         direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         print(f"  - 드라이브 임시 업로드 완료: {file_name} -> {direct_url}")
@@ -593,40 +377,40 @@ def clean_drive_temp_files(drive_service, file_ids):
 def check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id):
     if not worksheet:
         return
-        
+
     today_str = datetime.now().strftime("%Y-%m-%d")
-    report_tag_file = f"report_sent_{today_str}.txt"
-    
+    report_tag_file = f"agent_runs/report_sent_{today_str}.txt"
+
     if os.path.exists(report_tag_file):
         return
-        
+
     now = datetime.now()
     if now.hour >= 9:
         print(f"\n📢 [일일 보고] 아침 9시 이후가 되어 일일 성과 보고서를 생성합니다...")
-        
+
         # 이전 날짜의 리포트 태그 파일 청소
         import glob
-        for old_tag in glob.glob("report_sent_*.txt"):
+        for old_tag in glob.glob("agent_runs/report_sent_*.txt"):
             if old_tag != report_tag_file:
                 try:
                     os.remove(old_tag)
                 except Exception:
                     pass
-        
+
         records = worksheet.get_all_records()
         total_posts = len(records)
         total_impressions = 0
         total_saved = 0
-        
+
         for r in records:
             try:
                 total_impressions += int(r.get("조회수", 0))
                 total_saved += int(r.get("저장수", 0))
             except ValueError:
                 continue
-                
+
         doc_title = f"마인드팩토리_일일보고서_{today_str}"
-        
+
         report_text = f"""======================================================
 🧠 마인드팩토리 일일 성과 보고서 ({today_str})
 ======================================================
@@ -641,30 +425,30 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
 - 조회수 및 저장수 데이터를 실시간 피드백하여, 노출 저조 시 즉각적으로 비주얼(형광 포인트 극대화) 및 카피 어조의 다각화 우회 모듈을 활성화함으로써 계정 건강성을 방어하고 있습니다.
 - 향후 조회수가 높은 상위 키워드(예: 규율의 힘 등)를 중심으로 제작 주기를 좁혀 가며 포커싱할 예정입니다.
 """
-        
+
         try:
             if drive_service:
                 import io
                 from googleapiclient.http import MediaIoBaseUpload
-                
+
                 file_metadata = {
                     "name": doc_title,
                     "mimeType": "application/vnd.google-apps.document", # 구글 독스로 자동 변환
                     "parents": [report_folder_id]
                 }
-                
+
                 fh = io.BytesIO(report_text.encode('utf-8'))
                 media = MediaIoBaseUpload(fh, mimetype='text/plain', resumable=True)
-                
+
                 doc_file = drive_service.files().create(
                     body=file_metadata,
                     media_body=media,
                     fields="id"
                 ).execute()
-                
+
                 doc_id = doc_file.get("id")
                 print(f"📁 구글 드라이브 내 보고서 폴더에 일일보고서 직접 생성 및 업로드 완료 (ID: {doc_id})")
-                
+
                 with open(report_tag_file, "w") as f:
                     f.write("sent")
             else:
@@ -672,36 +456,14 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
         except Exception as e:
             print(f"[Error] 일일 보고서 업로드 중 예외 발생: {e}")
 
-def send_google_chat_report(topic, result_status, improvement_details):
-    webhook_url = os.getenv("GOOGLE_CHAT_WEBHOOK_URL", "")
-    if not webhook_url:
-        print("[Info] GOOGLE_CHAT_WEBHOOK_URL이 설정되지 않아 구글 챗 보고를 생략합니다.")
-        return
-        
-    report_text = f"""
-======================================================
-📢 *마인드팩토리 SNS 자동화 3시간 성과 보고서*
-======================================================
-* **포스팅 주제**: {topic}
-* **처리 결과**: {result_status}
-
-* **기존 포스팅 문제점 및 보완 내역**:
-{improvement_details}
-
-* **기대 성과 예측**:
-  - 이번 포스팅은 인스타그램 이용자의 '자기표현' 동기(남성 타겟 정체성)와 '지위 추구'(라이트 유저용 인증/챌린지 템플릿), '이타주의'(헤비 유저용 3단계 실천 팁)를 정밀 조준했습니다.
-  - 가벼운 오락 요소를 배제하고 명조체 기반의 묵직한 가치를 전달하므로, 단순 피드 조회를 넘어 독자들의 **'저장수'** 및 **'공유수'** 만족 지표가 크게 반등할 것으로 기대됩니다.
-======================================================
-"""
-    try:
-        payload = {"text": report_text}
-        res = requests.post(webhook_url, json=payload, timeout=10)
-        if res.status_code == 200:
-            print("✅ 구글 챗 성과 보고서 전송 완료!")
-        else:
-            print(f"[Warning] 구글 챗 전송 실패 (상태 코드: {res.status_code}): {res.text}")
-    except Exception as e:
-        print(f"[Warning] 구글 챗 전송 중 예외 발생: {e}")
+def send_pipeline_report(topic, result_status, detail):
+    message = (
+        "마인드팩토리 SNS 자동화 보고\n\n"
+        f"주제: {topic}\n"
+        f"처리 결과: {result_status}\n\n"
+        f"상세:\n{detail}"
+    )
+    send_telegram_message(message)
 
 # =====================================================================
 # 통합 파이프라인 엔진
@@ -712,33 +474,34 @@ def run_orchestration_loop():
         last_run_started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         last_result=None,
     )
+    send_telegram_message("파이프라인 시작: 오디언스 분석부터 업로드 준비까지 실행합니다.")
     print("\n" + "="*80)
     print(f"🚀 [Pipeline Run] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - 마인드팩토리 무인 공정 가동")
     print("="*80)
-    
+
     # 1. 구글 서비스 연결
     with agent_step("Google Agent", "Google Drive/Sheets 연결"):
         drive_service, docs_service, gspread_client = get_google_services()
-    
+
     # 2. 폴더 아키텍처 자동 갱신
     week_dir, _ = get_current_periods()
-    
+
     with agent_step("Archive Agent", "Drive 폴더/주차 구조 준비"):
         system_folder_id = get_or_create_drive_folder(drive_service, "SNS_Automatic_System")
         instagram_folder_id = get_or_create_drive_folder(drive_service, "instagram", system_folder_id)
         week_folder_id = get_or_create_drive_folder(drive_service, week_dir, instagram_folder_id)
         report_folder_id = get_or_create_drive_folder(drive_service, "보고서", week_folder_id)
-    
+
     # 3. 월 단위 시트 탭 매칭
     gsm = None
     worksheet = None
     with agent_step("Sheet Agent", "성과 기록 시트 준비"):
         gsm, worksheet = get_sheet_and_ensure_tab(gspread_client, drive_service, system_folder_id)
-    
+
     # 4. 직전 성과 분석에 따른 자가치유 트리거
     with agent_step("Growth Agent", "직전 성과 분석"):
         need_healing, last_title, last_content, impressions = check_last_post_performance(worksheet)
-    
+
     if need_healing:
         with agent_step("Recovery Agent", "저성과 원인 분석 및 개선 지침 생성"):
             analyze_and_generate_strategy(last_title, last_content, impressions)
@@ -750,12 +513,12 @@ def run_orchestration_loop():
                 print("✨ [자가치유 종료] 직전 피드 성과가 양호하여 이전 자가치유 전략을 제거했습니다.")
             except Exception as e:
                 print(f"[Warning] 이전 자가치유 전략 파일 삭제 실패: {e}")
-    
-    # 실시간 구글 서치(DuckDuckGo)를 통한 트렌드 학습 및 md 파일 누적 저장
+
+    # Antigravity CLI 검색을 위한 트렌드 조사 요청/결과 파일 저장
     try:
         with agent_step("Trend Agent", "인스타그램 트렌드 검색/저장"):
             from constants import OBSIDIAN_VAULT_PATH
-            print("\n[Trend Search] 인스타그램 트렌드 실시간 구글 서치(DuckDuckGo) 학습 가동...")
+            print("\n[Trend Search] Antigravity CLI 검색용 트렌드 조사 실행...")
             search_and_save_trends(OBSIDIAN_VAULT_PATH)
     except Exception as e:
         print(f"[Warning] 실시간 트렌드 검색/저장 실패: {e}")
@@ -785,7 +548,7 @@ def run_orchestration_loop():
             create_content_strategy()
     except Exception as e:
         print(f"[Warning] 콘텐츠 전략 생성 실패: {e}")
-    
+
     # 6. 새 대본 기획
     with agent_step("Story Agent", "카드뉴스 대본 생성"):
         run_generator_script(diversify=need_healing)
@@ -808,7 +571,7 @@ def run_orchestration_loop():
             )
             write_human_summary()
             return
-    
+
     # 7. 이미지 로컬 합성
     with agent_step("Visual Agent", "이미지 생성 요청/카드 합성"):
         success = generate_card_news_images()
@@ -821,16 +584,16 @@ def run_orchestration_loop():
         )
         write_human_summary()
         return
-        
+
     # 8. 구글 드라이브 임시 호스팅 연동 및 인스타그램 업로드
     drive_file_ids = []
     direct_urls = []
-    
+
     script_file = "script.json"
     if not os.path.exists(script_file):
         print("[Error] script.json 파일이 존재하지 않아 진행할 수 없습니다.")
         return
-        
+
     try:
         with open(script_file, "r", encoding="utf-8") as f:
             script_data = json.load(f)
@@ -850,7 +613,7 @@ def run_orchestration_loop():
                     direct_urls.append(durl)
                 else:
                     raise Exception("드라이브 임시 업로드에 실패했습니다.")
-                
+
         # 8. 인스타 발행 구동 (드라이브 주소 주입)
         if len(direct_urls) == pages_count:
             # 프로그램 호출 방식으로 깔끔하게 실행 (로컬 이미지 및 로그 기입까지 완료함)
@@ -858,14 +621,12 @@ def run_orchestration_loop():
                 upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
             if upload_success:
                 print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
-                try:
-                    topic = script_data.get("title", "SNS 콘텐츠 업로드")
-                    improvements = """  - 1장: 독자 현실 고통 공감 (문장 길이 축소 및 가독성 개선)
-  - 3장: 헤비 유저 소구 이타주의 3단계 실천 팁 탑재
-  - 마지막 장: 라이트 유저 소구 성취 증명용 선언/챌린지 템플릿 삽입"""
-                    send_google_chat_report(topic, "성공 (인스타그램 발행 완료)", improvements)
-                except Exception as gchat_err:
-                    print(f"[Warning] 구글 챗 보고 도중 예외: {gchat_err}")
+                topic = script_data.get("title", "SNS 콘텐츠 업로드")
+                send_pipeline_report(
+                    topic,
+                    "성공 (인스타그램 발행 완료)",
+                    "업로드, 시트 기록, 임시 파일 정리 단계까지 완료했습니다.",
+                )
             else:
                 raise Exception("인스타그램 카러셀 발행에 실패했습니다.")
     except Exception as run_err:
@@ -877,7 +638,11 @@ def run_orchestration_loop():
         )
         write_human_summary()
         try:
-            send_google_chat_report("파이프라인 구동 오류", f"실패 (에러 발생: {run_err})", "  - 파이프라인 예외 복구 조치 진행 필요")
+            send_pipeline_report(
+                "파이프라인 구동 오류",
+                f"실패 (에러 발생: {run_err})",
+                "파이프라인 예외 복구 조치가 필요합니다.",
+            )
         except Exception:
             pass
         return
@@ -886,11 +651,13 @@ def run_orchestration_loop():
         if drive_file_ids:
             with agent_step("Cleanup Agent", "임시 호스팅 파일 정리"):
                 clean_drive_temp_files(drive_service, drive_file_ids)
-            
+
     # 10. 아침 9시 성과 보고서 체크
     with agent_step("Report Agent", "일일 보고서 생성 여부 확인"):
         check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id)
-  
+
+    sync_publish_reports_to_obsidian()
+
     update_pipeline(
         state="waiting",
         last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -899,14 +666,16 @@ def run_orchestration_loop():
     write_human_summary()
 
 def main():
-    INTERVAL_SECONDS = 3 * 3600  # 3시간
+    # .env에서 PIPELINE_INTERVAL_SECONDS 설정을 로드하며 기본값은 3시간(10800초)입니다.
+    # 초기 2일 동안은 하루 3~4회(6~8시간 주기)로 조절하기 위해 환경변수로 조율 가능하게 분리합니다.
+    INTERVAL_SECONDS = int(os.getenv("PIPELINE_INTERVAL_SECONDS", 3 * 3600))
     update_pipeline(
         state="starting",
         interval_seconds=INTERVAL_SECONDS,
         started_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
     write_human_summary()
-    
+
     # 즉시 가동 전 중복 포스팅 방지 검증
     try:
         with agent_step("Startup Agent", "중복 업로드 방지 확인"):
@@ -931,31 +700,41 @@ def main():
                             print(f"\n[Orchestrator] 직전 업로드({last_date_str}) 후 {elapsed.total_seconds()/60:.1f}분 경과했습니다.")
                             print(f"  -> 중복 업로드 방지를 위해 앞으로 {sleep_seconds/60:.1f}분 대기 후 첫 공정을 가동합니다...")
                             full_minutes = int(sleep_seconds // 60)
+                            run_now = False
                             for _ in range(full_minutes):
                                 heartbeat("waiting_duplicate_guard")
                                 write_human_summary()
+                                if process_telegram_commands().get("run_now"):
+                                    print("[Telegram] 즉시 실행 명령을 받아 대기 시간을 건너뜁니다.")
+                                    run_now = True
+                                    break
                                 time.sleep(60)
                             remaining = sleep_seconds % 60
-                            if remaining:
+                            if remaining and not run_now:
                                 time.sleep(remaining)
     except Exception as e:
         print(f"\n[Warning] 중복 포스팅 대기 시간 확인 중 예외 발생 (즉시 기동): {e}")
 
     # 즉시 가동 시작
     run_orchestration_loop()
-    
+
     while True:
         try:
             next_at = next_run_time(INTERVAL_SECONDS)
             update_pipeline(state="waiting", next_run_at=next_at)
             write_human_summary()
             print(f"\n[Orchestrator] 다음 가동 시점까지 대기 중... (3시간, 다음 실행: {next_at})")
+            run_now = False
             for _ in range(INTERVAL_SECONDS // 60):
                 heartbeat("waiting_for_next_run")
                 write_human_summary()
+                if process_telegram_commands().get("run_now"):
+                    print("[Telegram] 즉시 실행 명령을 받아 대기 시간을 건너뜁니다.")
+                    run_now = True
+                    break
                 time.sleep(60)
             remaining = INTERVAL_SECONDS % 60
-            if remaining:
+            if remaining and not run_now:
                 time.sleep(remaining)
             run_orchestration_loop()
         except KeyboardInterrupt:

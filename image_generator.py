@@ -1,14 +1,11 @@
-import base64
 import glob
-from io import BytesIO
 import os
 import shutil
 from datetime import datetime
-from urllib.request import urlopen
 
-import requests
 from dotenv import load_dotenv
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
+from antigravity_bridge import run_image_task
 
 load_dotenv()
 
@@ -34,103 +31,16 @@ Requirements:
 - strong empty center area for Korean typography overlay
 - no text, no letters, no logos, no watermark, no UI
 - avoid neon colors and childish illustration
+- Subtly weave in visual storytelling metaphors like the 'Nano Banana' concept (representing slippery daily traps of laziness or sharp focus triggers) to enhance the visual depth and editorial storytelling.
 """.strip()
 
 
-def generate_openai_image(prompt, output_path):
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("[Image Gen] OPENAI_API_KEY가 없어 이미지 자동생성을 건너뜁니다.")
-        return False
-
-    model = os.getenv("IMAGE_GENERATION_MODEL", "gpt-image-1.5")
-    quality = os.getenv("IMAGE_GENERATION_QUALITY", "medium")
-    size = os.getenv("IMAGE_GENERATION_SIZE", "1024x1024")
-
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "size": size,
-        "quality": quality,
-        "n": 1,
-    }
-
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=120,
-        )
-        data = response.json()
-    except Exception as exc:
-        print(f"[Image Gen] 이미지 생성 요청 실패: {exc}")
-        return False
-
-    if response.status_code != 200:
-        print(f"[Image Gen] 이미지 생성 API 오류 ({response.status_code}): {data}")
-        return False
-
-    image_data = data.get("data", [{}])[0]
-    try:
-        if image_data.get("b64_json"):
-            raw = base64.b64decode(image_data["b64_json"])
-        elif image_data.get("url"):
-            with urlopen(image_data["url"], timeout=60) as img_response:
-                raw = img_response.read()
-        else:
-            print("[Image Gen] 응답에서 이미지 데이터를 찾지 못했습니다.")
-            return False
-
-        with open(output_path, "wb") as f:
-            f.write(raw)
-        return True
-    except Exception as exc:
-        print(f"[Image Gen] 이미지 저장 실패: {exc}")
-        return False
-
-
-def generate_gemini_image(prompt, output_path):
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("[Image Gen] GEMINI_API_KEY가 없어 나노바나나 이미지 생성을 건너뜁니다.")
-        return False
-
-    model = os.getenv("IMAGE_GENERATION_MODEL", "gemini-2.5-flash-image")
-
-    try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=[prompt],
-            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
-        )
-
-        for part in response.candidates[0].content.parts:
-            if getattr(part, "inline_data", None):
-                image = Image.open(BytesIO(part.inline_data.data))
-                image.save(output_path)
-                return True
-
-        print("[Image Gen] Gemini 응답에서 이미지 데이터를 찾지 못했습니다.")
-        return False
-    except Exception as exc:
-        print(f"[Image Gen] 나노바나나 이미지 생성 실패: {exc}")
-        return False
-
-
-def write_antigravity_image_brief(prompts, output_file="antigravity_image_requests.md"):
+def write_codex_image_brief(prompts, output_file="codex_image_requests.md"):
     lines = [
-        "# Antigravity Nano Banana Image Requests",
+        "# Antigravity Image Requests",
         "",
-        "아래 프롬프트는 안티그래비티 내장 나노바나나 이미지 생성에 넘길 장별 요청입니다.",
-        "각 이미지는 생성 후 `ANTIGRAVITY_OUTPUT_DIR`에 넣거나, 안티그래비티 기본 brain 폴더에 저장되면 파이프라인이 최신 PNG를 찾아 사용합니다.",
+        "아래 프롬프트는 Antigravity CLI 이미지 생성으로 처리할 장별 요청입니다.",
+        "각 이미지는 생성 후 `CODEX_OUTPUT_DIR`에 저장하면 파이프라인이 최신 PNG를 찾아 사용합니다.",
         "",
     ]
     for index, prompt in enumerate(prompts, start=1):
@@ -146,15 +56,11 @@ def write_antigravity_image_brief(prompts, output_file="antigravity_image_reques
         f.write("\n".join(lines))
 
 
-def find_antigravity_images(required_count, run_started_at):
-    explicit_dir = os.getenv("ANTIGRAVITY_OUTPUT_DIR", "").strip()
-    if explicit_dir:
-        candidates = glob.glob(os.path.join(explicit_dir, "*.png"))
-    else:
-        candidates = glob.glob(
-            os.path.expanduser("~/.gemini/antigravity-ide/brain/**/*.png"),
-            recursive=True,
-        )
+def find_codex_images(required_count, run_started_at):
+    explicit_dir = os.getenv("CODEX_OUTPUT_DIR", "").strip()
+    if not explicit_dir:
+        return []
+    candidates = glob.glob(os.path.join(explicit_dir, "*.png"))
 
     candidates = [
         path for path in candidates
@@ -164,31 +70,91 @@ def find_antigravity_images(required_count, run_started_at):
     return candidates[:required_count]
 
 
-def collect_antigravity_images(prompts, output_dir, run_started_at):
-    write_antigravity_image_brief(prompts)
-    wait_seconds = int(os.getenv("ANTIGRAVITY_IMAGE_WAIT_SECONDS", "0"))
-    explicit_dir = os.getenv("ANTIGRAVITY_OUTPUT_DIR", "").strip()
+def generate_codex_local_backgrounds(prompts, output_dir):
+    output_paths = []
+    palettes = [
+        ((15, 23, 42), (212, 175, 55)),
+        ((51, 65, 85), (148, 163, 184)),
+        ((248, 250, 240), (29, 78, 216)),
+        ((25, 31, 46), (94, 234, 212)),
+        ((38, 38, 38), (180, 180, 180)),
+    ]
+
+    for index, prompt in enumerate(prompts, start=1):
+        base, accent = palettes[(index - 1) % len(palettes)]
+        img = Image.new("RGB", (1080, 1080), base)
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        for step in range(0, 1080, 36):
+            alpha = max(10, 70 - step // 24)
+            draw.line([(0, step), (1080, step + 320)], fill=(*accent, alpha), width=2)
+
+        margin = 90 + (index % 3) * 24
+        draw.rectangle(
+            [margin, margin, 1080 - margin, 1080 - margin],
+            outline=(*accent, 70),
+            width=3,
+        )
+        draw.ellipse(
+            [760 - index * 18, 120 + index * 20, 1160 - index * 18, 520 + index * 20],
+            outline=(*accent, 45),
+            width=5,
+        )
+
+        # The prompt is intentionally not rendered as text; it only influences a stable visual seed.
+        seed = sum(ord(ch) for ch in prompt)
+        for n in range(16):
+            x = (seed * (n + 3) * 17) % 1080
+            y = (seed * (n + 5) * 23) % 1080
+            r = 20 + ((seed + n * 13) % 90)
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=(*accent, 10))
+
+        img = img.filter(ImageFilter.GaussianBlur(radius=0.7))
+        output_path = os.path.join(output_dir, f"page{index}_bg.png")
+        img.save(output_path, "PNG")
+        output_paths.append(output_path)
+        print(f"  - Antigravity 폴백 로컬 배경 생성: {output_path}")
+
+    return output_paths
+
+
+def collect_codex_images(prompts, output_dir, run_started_at):
+    write_codex_image_brief(prompts)
+
+    generated_by_antigravity = []
+    for index, prompt in enumerate(prompts, start=1):
+        output_path = os.path.join(output_dir, f"page{index}_bg.png")
+        result = run_image_task(prompt, output_path)
+        if result:
+            generated_by_antigravity.append(result)
+
+    if len(generated_by_antigravity) == len(prompts):
+        print("[Image Gen] Antigravity CLI 이미지 생성 완료.")
+        return generated_by_antigravity
+
+    wait_seconds = int(os.getenv("CODEX_IMAGE_WAIT_SECONDS", "0"))
+    explicit_dir = os.getenv("CODEX_OUTPUT_DIR", "").strip()
     if wait_seconds > 0:
-        print(f"[Image Gen] 안티그래비티 이미지 산출물 대기 중... ({wait_seconds}초)")
+        print(f"[Image Gen] 외부 이미지 산출물 대기 중... ({wait_seconds}초)")
         import time
         time.sleep(wait_seconds)
     elif not explicit_dir:
-        print("[Image Gen] 안티그래비티 요청 파일만 생성했습니다. 대기 시간이 0초라 이미지 탐색을 생략합니다.")
-        print("  - 요청 파일: antigravity_image_requests.md")
+        print("[Image Gen] Antigravity 이미지 요청 파일만 생성했습니다. 대기 시간이 0초라 이미지 탐색을 생략합니다.")
+        print("  - 요청 파일: codex_image_requests.md")
         return []
 
-    found_images = find_antigravity_images(len(prompts), run_started_at)
+    found_images = find_codex_images(len(prompts), run_started_at)
     if len(found_images) < len(prompts):
-        print("[Image Gen] 안티그래비티 생성 이미지가 충분하지 않아 기존 배경으로 폴백합니다.")
-        print("  - 요청 파일: antigravity_image_requests.md")
-        return []
+        print("[Image Gen] Antigravity/외부 산출 이미지가 충분하지 않아 로컬 폴백 배경을 생성합니다.")
+        print("  - 요청 파일: codex_image_requests.md")
+        return generate_codex_local_backgrounds(prompts, output_dir)
 
     output_paths = []
     for index, source_path in enumerate(found_images, start=1):
         target_path = os.path.join(output_dir, f"page{index}_bg.png")
         shutil.copy2(source_path, target_path)
         output_paths.append(target_path)
-        print(f"  - 안티그래비티 이미지 연결: {source_path} -> {target_path}")
+        print(f"  - 외부 생성 이미지 연결: {source_path} -> {target_path}")
     return output_paths
 
 
@@ -197,37 +163,11 @@ def generate_background_images(script_data, output_root="generated_backgrounds")
     if not pages:
         return []
 
-    provider = os.getenv("IMAGE_GENERATION_PROVIDER", "antigravity").lower()
-    if provider not in {"antigravity", "gemini", "openai"}:
-        print(f"[Image Gen] 지원하지 않는 이미지 생성 provider입니다: {provider}")
-        return []
-
     run_started_at = datetime.now().timestamp()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(output_root, run_id)
     os.makedirs(output_dir, exist_ok=True)
 
     title = script_data.get("title", "")
-    generated_paths = []
     prompts = [build_background_prompt(page, title) for page in pages]
-
-    if provider == "antigravity":
-        return collect_antigravity_images(prompts, output_dir, run_started_at)
-
-    for index, prompt in enumerate(prompts, start=1):
-        output_path = os.path.join(output_dir, f"page{index}_bg.png")
-        print(f"[Image Gen] {index}장 배경 자동생성 중...")
-
-        if provider == "gemini":
-            success = generate_gemini_image(prompt, output_path)
-        else:
-            success = generate_openai_image(prompt, output_path)
-
-        if success:
-            generated_paths.append(output_path)
-            print(f"  - 생성 완료: {output_path}")
-        else:
-            print(f"  - 생성 실패: {index}장")
-            return []
-
-    return generated_paths
+    return collect_codex_images(prompts, output_dir, run_started_at)

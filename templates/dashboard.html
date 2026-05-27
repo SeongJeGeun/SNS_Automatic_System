@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MindFactory AI Brain + SNS Automation Dashboard</title>
+  <!-- Google Fonts & Tailwind Icons CSS (Lucide) -->
+  <link rel="stylesheet" href="https://unpkg.com/lucide-static@latest/font/lucide.css">
+  <!-- Vis.js CDN for Obsidian Knowledge Network Graph -->
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <!-- Local Styles -->
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Dashboard Container -->
+  <div class="dashboard-container">
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand-section">
+        <div class="brand-logo">MF</div>
+        <div class="brand-title">
+          <h1>MindFactory</h1>
+          <p>AI Control Center</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 2rem;">
+        <div>
+          <h3 class="nav-group-title">기본 메뉴</h3>
+          <ul class="nav-list">
+            <li class="nav-item active"><a href="#"><i class="lucide-layout-dashboard"></i> 관제 메인</a></li>
+            <li class="nav-item"><a href="#ai-insights-section"><i class="lucide-brain-circuit"></i> AI 두뇌 분석</a></li>
+            <li class="nav-item"><a href="#performance-section"><i class="lucide-trending-up"></i> 성과 리포트</a></li>
+            <li class="nav-item"><a href="#integrations-section"><i class="lucide-key-round"></i> 외부 연동 관리</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="nav-group-title">수동 파이프라인 제어</h3>
+          <ul class="nav-list" style="gap: 0.5rem;">
+            <li><button class="btn btn-outline" style="width:100%; justify-content:flex-start;" onclick="showToast('파이프라인 통계가 수동 동기화되었습니다.')"><i class="lucide-refresh-cw"></i> 상태 동기화</button></li>
+            <li><button class="btn btn-outline" style="width:100%; justify-content:flex-start; color:var(--status-warning);" onclick="showToast('자동 파이프라인이 6시간 동안 일시 중지됩니다.')"><i class="lucide-pause"></i> 일시 중지</button></li>
+            <li><button class="btn btn-outline" style="width:100%; justify-content:flex-start; color:var(--status-success);" onclick="showToast('일시 중지된 파이프라인이 정상 재개되었습니다.')"><i class="lucide-play"></i> 파이프라인 재개</button></li>
+            <li><button class="btn btn-outline" style="width:100%; justify-content:flex-start; color:var(--text-muted);" onclick="showToast('이번 3시간 주기 업로드를 1회 건너뜁니다.')"><i class="lucide-skip-forward"></i> 이번 주기 스킵</button></li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+
+      <!-- 1. Top Header -->
+      <header class="top-header">
+        <div class="brand-title">
+          <h1>MindFactory AI Brain + SNS Automation</h1>
+          <p>마인드팩토리 자동화 파이프라인 관제 콘솔</p>
+        </div>
+        <div class="header-controls">
+          <!-- Google Drive & Reports Shortcut Links -->
+          <a href="https://drive.google.com/drive/folders/mock_instagram_folder" target="_blank" class="btn btn-outline" style="text-decoration:none;">
+            <i class="lucide-folder-open"></i> Google Drive 폴더
+          </a>
+          <a href="https://docs.google.com/spreadsheets/d/mock_sheet_id" target="_blank" class="btn btn-outline" style="text-decoration:none;">
+            <i class="lucide-file-spreadsheet"></i> 성과 리포트 Sheet
+          </a>
+
+          <!-- Run / Status Indicator Area -->
+          <div id="header-status-indicator" class="status-indicator">
+            <div class="status-dot"></div>
+            <span>상태: 대기 중 (Waiting)</span>
+          </div>
+
+          <!-- "Run Now" Button (visible only when waiting) -->
+          <button id="btn-run-now" class="btn btn-teal" onclick="toggleExecution()">
+            <i class="lucide-play-circle"></i> 지금 실행
+          </button>
+        </div>
+      </header>
+
+      <!-- 2. 운영 상태 요약 -->
+      <section class="summary-grid">
+        <div class="summary-card">
+          <span class="summary-title">현재 단계</span>
+          <span class="summary-value" id="summary-current-agent">Story Agent</span>
+          <span class="summary-footer"><i class="lucide-clock"></i> 17:51:06 갱신</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-title">전체 진행률</span>
+          <span class="summary-value" id="summary-progress-text">68%</span>
+          <div class="progress-container">
+            <div class="progress-bar" id="pipeline-progress-bar" style="width: 68%;"></div>
+          </div>
+        </div>
+        <div class="summary-card teal">
+          <span class="summary-title">다음 실행 예정 시각</span>
+          <span class="summary-value" id="summary-next-run">대기 중</span>
+          <span class="summary-footer"><i class="lucide-calendar"></i> 3시간 단위 루프 가동</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-title">목표 달성률</span>
+          <span class="summary-value">68%</span>
+          <span class="summary-footer"><i class="lucide-check-circle2" style="color:var(--status-success)"></i> 주간 포스팅 목표 도달 중</span>
+        </div>
+        <div class="summary-card teal">
+          <span class="summary-title">트렌드 적합도</span>
+          <span class="summary-value">82</span>
+          <span class="summary-footer"><i class="lucide-sparkles" style="color:var(--color-teal)"></i> 타겟 선호 키워드 4개 반영</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-title">AI 개선안</span>
+          <span class="summary-value">4개</span>
+          <span class="summary-footer"><i class="lucide-wrench" style="color:var(--status-warning)"></i> 자기치유 보완 플래그 적용됨</span>
+        </div>
+      </section>
+
+      <!-- Row 1: Google Drive 결과 주소 + 클릭형 파이프라인 -->
+      <section class="dashboard-row-1">
+
+        <!-- 클릭형 파이프라인 카드 -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><i class="lucide-workflow"></i> 클릭형 에이전트 파이프라인</h2>
+            <span class="pill info">마인드팩토리 7단계 관제공정</span>
+          </div>
+
+          <!-- Pipeline Progress Track -->
+          <div class="pipeline-track">
+            <div class="pipeline-progress-line" style="width: 70%;"></div>
+
+            <div class="pipeline-node completed" onclick="selectPipelineNode('audience', this)">
+              <div class="node-circle">1</div>
+              <span class="node-label">Audience</span>
+            </div>
+            <div class="pipeline-node completed" onclick="selectPipelineNode('trend', this)">
+              <div class="node-circle">2</div>
+              <span class="node-label">Trend</span>
+            </div>
+            <div class="pipeline-node completed" onclick="selectPipelineNode('strategy', this)">
+              <div class="node-circle">3</div>
+              <span class="node-label">Strategy</span>
+            </div>
+            <div class="pipeline-node active" onclick="selectPipelineNode('story', this)">
+              <div class="node-circle">4</div>
+              <span class="node-label">Story / Quality</span>
+            </div>
+            <div class="pipeline-node" onclick="selectPipelineNode('visual', this)">
+              <div class="node-circle">5</div>
+              <span class="node-label">Visual / Drive</span>
+            </div>
+            <div class="pipeline-node" onclick="selectPipelineNode('publishing', this)">
+              <div class="node-circle">6</div>
+              <span class="node-label">Publishing</span>
+            </div>
+            <div class="pipeline-node" onclick="selectPipelineNode('performance', this)">
+              <div class="node-circle">7</div>
+              <span class="node-label">Feedback</span>
+            </div>
+          </div>
+
+          <!-- Pipeline detailed panel -->
+          <div class="pipeline-panel">
+            <div class="panel-header">
+              <span class="panel-title" id="panel-title">에이전트 단계를 선택해 주십시오.</span>
+              <span class="pill info" style="background-color:rgba(6,182,212,0.1); color:var(--color-teal-light);">실시간 상태 모니터</span>
+            </div>
+            <div class="panel-grid">
+              <div class="panel-item">
+                <span class="panel-label">에이전트 개요</span>
+                <span class="panel-val" id="panel-desc">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">입력값 (Input)</span>
+                <span class="panel-val" id="panel-input">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">현재 처리 중인 작업</span>
+                <span class="panel-val" id="panel-task">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">완료 조건</span>
+                <span class="panel-val" id="panel-success">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">실패 시 복구 전략 (Self-Healing)</span>
+                <span class="panel-val" id="panel-recovery">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">다음 단계 전환 조건</span>
+                <span class="panel-val" id="panel-next">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">관련 파일 및 상태값</span>
+                <span class="panel-val-code" id="panel-files">-</span>
+              </div>
+              <div class="panel-item">
+                <span class="panel-label">관련 API 상태</span>
+                <span class="panel-val" id="panel-api">-</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Google Drive 결과 주소 카드 -->
+        <div class="card teal">
+          <div class="card-header">
+            <h2 class="card-title"><i class="lucide-hard-drive"></i> 최종 결과물 저장소 및 발행 링크</h2>
+            <span class="pill success">Cloud Storage</span>
+          </div>
+
+          <div class="links-grid">
+            <div class="link-row">
+              <div class="link-info">
+                <span class="link-name">오늘 카드뉴스 결과 폴더</span>
+                <div class="link-meta">
+                  <span class="pill info">Google Drive</span>
+                  <span>최종 업데이트: 15:53:16</span>
+                </div>
+              </div>
+              <a href="https://drive.google.com/drive/folders/mock_today_news" target="_blank" class="btn btn-outline btn-teal" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 열기
+              </a>
+            </div>
+
+            <div class="link-row">
+              <div class="link-info">
+                <span class="link-name">합성 이미지 결과 폴더 (W1)</span>
+                <div class="link-meta">
+                  <span class="pill info">Google Drive</span>
+                  <span>최종 업데이트: 15:53:16</span>
+                </div>
+              </div>
+              <a href="https://drive.google.com/drive/folders/mock_images" target="_blank" class="btn btn-outline btn-teal" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 열기
+              </a>
+            </div>
+
+            <div class="link-row">
+              <div class="link-info">
+                <span class="link-name">성과 리포트 Google Sheet</span>
+                <div class="link-meta">
+                  <span class="pill success">Google Sheets</span>
+                  <span>최종 업데이트: 15:47:22</span>
+                </div>
+              </div>
+              <a href="https://docs.google.com/spreadsheets/d/mock_sheet_id" target="_blank" class="btn btn-outline btn-teal" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 열기
+              </a>
+            </div>
+
+            <div class="link-row">
+              <div class="link-info">
+                <span class="link-name">최종 Instagram 게시물 링크</span>
+                <div class="link-meta">
+                  <span class="pill info" style="background-color:rgba(139,92,246,0.1); color:var(--color-purple-light);">Instagram Graph</span>
+                  <span>최종 업데이트: 2026-05-26 14:04</span>
+                </div>
+              </div>
+              <a href="https://www.instagram.com/p/C7X_MockLink/" target="_blank" class="btn btn-outline" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 열기
+              </a>
+            </div>
+
+            <div class="link-row">
+              <div class="link-info">
+                <span class="link-name">최근 Threads 게시물 링크</span>
+                <div class="link-meta">
+                  <span class="pill info" style="background-color:rgba(6,182,212,0.1); color:var(--color-teal-light);">Threads API</span>
+                  <span>최종 업로드 보고서 기준</span>
+                </div>
+              </div>
+              <a href="https://www.threads.net/@mind_factory_us" target="_blank" class="btn btn-outline btn-teal" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 열기
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Row 2: Obsidian 두뇌 + 요즘 트렌드 분석 + AI 분석 챗 -->
+      <section class="dashboard-row-2" id="ai-insights-section">
+
+        <!-- 5. Obsidian 두뇌 지식 그래프 카드 -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><i class="lucide-network"></i> Obsidian AI 지식 두뇌망 시각화</h2>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <span class="pill info" id="obsidian-status-pill">Obsidian Vault RAG Network</span>
+              <a href="obsidian://open?vault=obsidian_vault" class="btn btn-outline btn-teal" style="padding:0.3rem 0.6rem; font-size:0.7rem; text-decoration:none; display: flex; align-items: center; gap: 0.25rem;">
+                <i class="lucide-external-link" style="font-size: 0.75rem;"></i> 앱에서 열기
+              </a>
+            </div>
+          </div>
+          <!-- Vis.js Container -->
+          <div id="obsidian-network"></div>
+
+          <div>
+            <span class="panel-label" style="display:block; margin-bottom:0.25rem;">수집/학습 중인 핵심 태그</span>
+            <div class="obsidian-tags">
+              <span class="obsidian-tag">#트렌드</span>
+              <span class="obsidian-tag">#번아웃</span>
+              <span class="obsidian-tag">#저장률</span>
+              <span class="obsidian-tag">#CTA</span>
+              <span class="obsidian-tag">#실패원인</span>
+              <span class="obsidian-tag">#다음실험</span>
+              <span class="obsidian-tag">#감정소진</span>
+              <span class="obsidian-tag">#공감문장</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. 요즘 트렌드 분석 & 7. AI 분석 챗 -->
+        <div style="display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.5rem;">
+
+          <!-- 트렌드 분석 -->
+          <div class="card teal">
+            <div class="card-header">
+              <h2 class="card-title"><i class="lucide-trending-up"></i> 요즘 청년층 트렌드 분석</h2>
+              <span class="pill info">DDG Trend Radar</span>
+            </div>
+
+            <div class="trends-container">
+              <div class="trend-card">
+                <div class="trend-header">
+                  <span class="trend-title">번아웃 / 무기력</span>
+                  <span class="status-pill up">상승세 (HOT)</span>
+                </div>
+                <p class="trend-desc">성과 압박은 높으나 성과가 즉시 드러나지 않아 동기부여가 방전된 상태. '해야 하는 것'에 압도당해 시작조차 하지 못하고 자책을 반복함.</p>
+                <div class="trend-tags">
+                  <span>추천: 공감형 반전 훅</span>
+                  <span>주의: 게으름 단정 및 훈계 배제</span>
+                </div>
+              </div>
+
+              <div class="trend-card">
+                <div class="trend-header">
+                  <span class="trend-title">불안 관리 / 수면 루틴</span>
+                  <span class="status-pill stable">안정 (Stable)</span>
+                </div>
+                <p class="trend-desc">늦은 밤 스마트폰 중독과 아침 피로의 반복으로 인해 자율성 상실감을 호소함. 멘탈 관리에 직접 작용하는 물리적 수면 루틴 선호.</p>
+                <div class="trend-tags">
+                  <span>추천: 체크리스트형 실천 3단계</span>
+                  <span>예상반응: 저장률 극대화</span>
+                </div>
+              </div>
+
+              <div class="trend-card">
+                <div class="trend-header">
+                  <span class="trend-title">자기계발 피로감</span>
+                  <span class="status-pill candidate">후보 (Candidate)</span>
+                </div>
+                <p class="trend-desc">'갓생 살기', '미라클 모닝' 등 지나치게 타이트한 자기계발 라이프스타일에 대한 반발 및 지침. 지속가능한 일상 규율에 관심 증가.</p>
+                <div class="trend-tags">
+                  <span>추천: 뼈 때리는 현실주의 팩폭</span>
+                  <span>주의: 철학적 추상문장 피하기</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI 분석 챗 -->
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title"><i class="lucide-message-square-code"></i> AI 의도 추론 및 분석 챗</h2>
+              <span class="pill info">Agent Chat Log</span>
+            </div>
+
+            <div class="chat-container" id="chat-container">
+              <div class="chat-bubble trend-agent">
+                <div class="chat-avatar">TA</div>
+                <div class="chat-content">
+                  <span class="chat-sender">Trend Agent</span>
+                  <p class="chat-text">오늘은 "번아웃", "무기력", "수면", "자기계발 피로감"을 카드뉴스 기획 후보군으로 추출하는 것이 타겟 고객들의 높은 반응성을 유도하기에 가장 적합합니다.</p>
+                </div>
+              </div>
+
+              <div class="chat-bubble strategy-agent">
+                <div class="chat-avatar">SA</div>
+                <div class="chat-content">
+                  <span class="chat-sender">Strategy Agent</span>
+                  <p class="chat-text">성과 기록을 볼 때 타겟의 최고 관심사는 저장률이었습니다. 감정 공감형 표지 구성 후 "나중에 무너졌을 때 바로 꺼내볼 3가지 행동 지침"을 5~6장에 구체적으로 요약 배치하겠습니다.</p>
+                </div>
+              </div>
+
+              <div class="chat-bubble learning-agent">
+                <div class="chat-avatar">LA</div>
+                <div class="chat-content">
+                  <span class="chat-sender">Learning Agent</span>
+                  <p class="chat-text">자가치유 피드백 작동 결과: 지난 불안 관리 포스팅은 조회수 대비 저장률이 낮았습니다. 마지막 장에 타겟층이 지위 및 자존감을 인증하기 용이한 "내일부터 무리하지 않기로 다짐하는 챌린지 문구"를 강제 주입합니다.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Natural Language Command Input -->
+            <div style="display:flex; gap:0.5rem; border-top:1px solid var(--border-color); padding-top:0.75rem;">
+              <input type="text" id="nl-command-input" class="form-control" placeholder="AI 비서에게 자연어로 지시를 내리세요 (예: '규율에 대한 주제로 즉시 포스팅해줘')...">
+              <button class="btn" style="padding:0.6rem 1rem;" onclick="sendNLCommand()"><i class="lucide-send"></i></button>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- Row 3: 목표 달성 관리 + 성과 요약 표 -->
+      <section class="dashboard-row-3" id="performance-section">
+
+        <!-- 8. 목표 달성 관리 -->
+        <div class="card teal">
+          <div class="card-header">
+            <h2 class="card-title"><i class="lucide-target"></i> 핵심 목표 달성 관리 (KPI)</h2>
+            <span class="pill success">Target Tracking</span>
+          </div>
+
+          <div class="goals-list">
+            <div class="goal-item">
+              <div class="goal-info">
+                <span class="goal-name"><i class="lucide-star" style="color:var(--color-teal); font-size:0.9rem;"></i> 저장률 3.5% 이상</span>
+                <span class="goal-values">현재 2.4% / 목표 3.5%</span>
+              </div>
+              <div class="goal-progress">
+                <div class="goal-progress-bar" style="width: 68%;"></div>
+              </div>
+              <div class="goal-meta">
+                <span>AI 판단: <strong style="color:var(--status-warning);">미달 (보완 중)</strong></span>
+                <span>다음 액션: 마지막 장 CTA 챌린지 강화</span>
+              </div>
+            </div>
+
+            <div class="goal-item">
+              <div class="goal-info">
+                <span class="goal-name"><i class="lucide-star" style="color:var(--color-teal); font-size:0.9rem;"></i> 주 14개 카드뉴스 생성</span>
+                <span class="goal-values">현재 14개 / 목표 14개</span>
+              </div>
+              <div class="goal-progress">
+                <div class="goal-progress-bar" style="width: 100%; background:var(--status-success);"></div>
+              </div>
+              <div class="goal-meta">
+                <span>AI 판단: <strong style="color:var(--status-success);">목표 달성</strong></span>
+                <span>다음 액션: 템플릿 렌더러 안정화 유지</span>
+              </div>
+            </div>
+
+            <div class="goal-item">
+              <div class="goal-info">
+                <span class="goal-name"><i class="lucide-star" style="color:var(--color-teal); font-size:0.9rem;"></i> 주간 누적 도달 8,000+</span>
+                <span class="goal-values">현재 8,420 / 목표 8,000</span>
+              </div>
+              <div class="goal-progress">
+                <div class="goal-progress-bar" style="width: 100%; background:var(--status-success);"></div>
+              </div>
+              <div class="goal-meta">
+                <span>AI 판단: <strong style="color:var(--status-success);">초과 달성</strong></span>
+                <span>다음 액션: 인스타그램 추천 노출 알고리즘 모니터링</span>
+              </div>
+            </div>
+
+            <div class="goal-item">
+              <div class="goal-info">
+                <span class="goal-name"><i class="lucide-star" style="color:var(--color-teal); font-size:0.9rem;"></i> 팔로워 전환율 개선 (도달 대비 1%)</span>
+                <span class="goal-values">현재 0.75% / 목표 1.0%</span>
+              </div>
+              <div class="goal-progress">
+                <div class="goal-progress-bar" style="width: 75%;"></div>
+              </div>
+              <div class="goal-meta">
+                <span>AI 판단: <strong style="color:var(--status-warning);">미달 (관찰 필요)</strong></span>
+                <span>다음 액션: 프로필 링크 구성 최적화</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 9. 성과 요약 표 -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title"><i class="lucide-clipboard-list"></i> 최근 피드 콘텐츠 성과 분석표</h2>
+            <span class="pill info">Performance Summary</span>
+          </div>
+
+          <div class="table-container">
+            <table class="performance-table">
+              <thead>
+                <tr>
+                  <th>콘텐츠 주제</th>
+                  <th>목표 지표</th>
+                  <th>현재 성과</th>
+                  <th>AI 판단</th>
+                  <th>다음 개선 액션 (Next Action)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="font-weight:600; color:var(--text-primary);">번아웃 위로와 해소</td>
+                  <td>저장률 3.5%</td>
+                  <td>게시 직후 수집 대기</td>
+                  <td><span class="pill info">관찰 중</span></td>
+                  <td>2시간 후 초기 조회수 및 저장수 확인</td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600; color:var(--text-primary);">불안을 줄이는 밤 루틴</td>
+                  <td>도달 8,000+</td>
+                  <td style="color:var(--status-success);">도달 8,420 / 저장 182</td>
+                  <td><span class="pill success">성공</span></td>
+                  <td>동작 중심 체크리스트형 레이아웃 재사용</td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600; color:var(--text-primary);">기분에 의존하지 않는 힘</td>
+                  <td>저장률 3.5%</td>
+                  <td style="color:var(--status-danger);">도달 1,240 / 저장 12</td>
+                  <td><span class="pill warning" style="background-color:rgba(239,68,68,0.1); color:var(--status-danger);">치유 발동</span></td>
+                  <td>자가치유(Self-healing) 가동, 극약처방 훅 적용</td>
+                </tr>
+                <tr>
+                  <td style="font-weight:600; color:var(--text-primary);">인생을 바꾸는 극도의 몰입</td>
+                  <td>도달 8,000+</td>
+                  <td>도달 9,120 / 저장 202</td>
+                  <td><span class="pill success">성공</span></td>
+                  <td>남성 타겟 정체성 자극 멘탈 팩폭 강화</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Row 4: 추가 운영 메모 / 자가발전 데이터 -->
+      <section class="card" id="operation-memory-section">
+        <div class="card-header">
+          <h2 class="card-title"><i class="lucide-route"></i> 추가 운영 메모 및 자가발전 루프</h2>
+          <span class="pill info">Project Memory Sync</span>
+        </div>
+
+        <div class="operation-memory-grid">
+          <div class="operation-memory-panel">
+            <span class="panel-label">현재 반영 상태</span>
+            <h3 id="operation-current-title">운영 메모 로딩 중</h3>
+            <p id="operation-current-desc">-</p>
+            <div class="operation-status-row">
+              <span class="status-pill stable" id="operation-threads-status">Threads 확인 중</span>
+              <a id="operation-threads-link" href="#" target="_blank" class="btn btn-outline btn-teal" style="padding:0.35rem 0.7rem; font-size:0.75rem; text-decoration:none;">
+                <i class="lucide-external-link"></i> 최근 Threads
+              </a>
+            </div>
+          </div>
+
+          <div class="operation-memory-panel">
+            <span class="panel-label">완료 / 대기 작업</span>
+            <div class="operation-list" id="operation-completed-list"></div>
+            <div class="operation-list pending" id="operation-pending-list"></div>
+          </div>
+
+          <div class="operation-memory-panel">
+            <span class="panel-label">시점별 성과 보고 체계</span>
+            <div class="report-step-list" id="operation-report-steps"></div>
+          </div>
+
+          <div class="operation-memory-panel">
+            <span class="panel-label">교차 성장 규칙 / Obsidian 저장</span>
+            <div class="operation-list" id="operation-cross-rules"></div>
+            <p class="operation-note" id="operation-obsidian-note">-</p>
+            <p class="operation-note" id="operation-healing-note">-</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. 외부 연동 / 토큰 관리 패널 -->
+      <section class="card" id="integrations-section">
+        <div class="card-header">
+          <h2 class="card-title"><i class="lucide-settings-2"></i> 외부 API 연동 상태 및 자격 증명 (Credentials)</h2>
+          <span class="pill info">Connection Manager</span>
+        </div>
+
+        <div class="integrations-grid">
+          <div class="integration-card" onclick="openIntegrationModal('instagram')">
+            <div class="integration-icon"><i class="lucide-instagram"></i></div>
+            <span class="integration-name">Instagram API</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('threads')">
+            <div class="integration-icon"><i class="lucide-message-circle"></i></div>
+            <span class="integration-name">Threads API</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('telegram')">
+            <div class="integration-icon"><i class="lucide-message-square"></i></div>
+            <span class="integration-name">Telegram Bot</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('gdrive')">
+            <div class="integration-icon"><i class="lucide-folder"></i></div>
+            <span class="integration-name">Google Drive</span>
+            <span class="integration-status error">확인필요</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('gsheet')">
+            <div class="integration-icon"><i class="lucide-sheet"></i></div>
+            <span class="integration-name">Google Sheets</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('obsidian')">
+            <div class="integration-icon"><i class="lucide-database"></i></div>
+            <span class="integration-name">Obsidian Vault</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+
+          <div class="integration-card" onclick="openIntegrationModal('codex')">
+            <div class="integration-icon"><i class="lucide-cpu"></i></div>
+            <span class="integration-name">Codex AI</span>
+            <span class="integration-status connected">정상</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Connection Credentials Detail Modal (Popup) -->
+  <div class="modal-overlay" id="integration-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modal-name">Instagram Graph API 연결 정보</h3>
+        <button class="modal-close" onclick="closeIntegrationModal()">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <span class="form-label">연결 계정</span>
+        <span class="form-control" style="background-color:rgba(255,255,255,0.01);" id="modal-account-val">-</span>
+      </div>
+
+      <div class="form-group">
+        <span class="form-label">연결 ID / 상세</span>
+        <span class="form-control" style="background-color:rgba(255,255,255,0.01);" id="modal-id-val">-</span>
+      </div>
+
+      <div class="form-group">
+        <span class="form-label">API 보안 토큰 (마스킹 처리됨)</span>
+        <input type="text" id="modal-token-input" class="form-control" value="">
+        <span style="font-size:0.7rem; color:var(--text-muted);">* 보안을 위해 브라우저 LocalStorage에 원본 토큰은 저장되지 않으며, 서버 측 파일(.env)에 암호화 보관됩니다.</span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="form-group">
+          <span class="form-label">권한 목록 (Scope)</span>
+          <span class="panel-val" id="modal-permission-val" style="font-size:0.8rem;">-</span>
+        </div>
+        <div class="form-group">
+          <span class="form-label">토큰 만료 예정일</span>
+          <span class="panel-val" id="modal-expiry-val" style="font-size:0.8rem;">-</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <span class="form-label">마지막 유효성 검증 시각</span>
+        <span class="panel-val" id="modal-check-val" style="font-size:0.8rem;">-</span>
+      </div>
+
+       <div class="form-group">
+        <span class="form-label">최근 연동 관련 에러</span>
+        <span class="panel-val" id="modal-error-val" style="font-size:0.8rem; color:var(--status-danger);">-</span>
+      </div>
+
+      <!-- Instagram 새 인증 필요 경고 영역 -->
+      <div class="form-group" id="modal-insta-warning" style="display:none; background-color:rgba(239,68,68,0.1); border: 1px solid var(--status-danger); padding:0.75rem; border-radius:6px; margin-top:1rem;">
+        <span style="color:var(--status-danger); font-size:0.8rem; font-weight:600; display:block; margin-bottom:0.25rem;">🚨 새 인증 필요</span>
+        <span style="font-size:0.75rem; color:var(--text-primary); line-height:1.4;">Instagram 토큰을 다시 인증해야 합니다. Meta/Instagram 로그인 후 새 short-lived token을 발급받아 long-lived token으로 교환하세요.</span>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-modal-test" onclick="testIntegrationConnection()"><i class="lucide-activity"></i> 연결 테스트</button>
+        <button class="btn btn-outline" id="btn-modal-insta-validate" style="display:none;" onclick="validateInstagramToken()"><i class="lucide-check-circle"></i> 토큰 검증</button>
+        <button class="btn btn-outline btn-teal" id="btn-modal-insta-refresh" style="display:none;" onclick="refreshInstagramToken()"><i class="lucide-refresh-cw"></i> 토큰 Refresh</button>
+        <button class="btn btn-teal" onclick="saveIntegrationToken()"><i class="lucide-save"></i> 변경 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Local Script Loader -->
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

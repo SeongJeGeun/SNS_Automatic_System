@@ -82,9 +82,9 @@ def create_content_strategy(
     return strategy
 
 
-def write_strategy_brief(strategy, output_file="antigravity_strategy_brief.md"):
+def write_strategy_brief(strategy, output_file="codex_strategy_brief.md"):
     lines = [
-        "# Antigravity Content Strategy Brief",
+        "# Codex Content Strategy Brief",
         "",
         "카드뉴스 생성 전에 반드시 따라야 하는 콘텐츠 전략입니다.",
         "",

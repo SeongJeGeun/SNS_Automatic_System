@@ -81,7 +81,7 @@ def evaluate_script_quality(
         mid_pages_text = " ".join([text_of(pages[2]), text_of(pages[3])])
     elif len(pages) >= 3:
         mid_pages_text = text_of(pages[2])
-    
+
     has_altruistic_tip = any(word in mid_pages_text for word in ["단계", "팁", "방법", "원칙", "요약"])
     if has_altruistic_tip:
         score += 8
@@ -126,7 +126,7 @@ def evaluate_script_quality(
         findings.append("추상적인 동기부여 단어가 현실 고민보다 많습니다.")
 
     minimum_score = int(strategy.get("quality_bar", {}).get("minimum_score", 72))
-    passed = score >= minimum_score and not any("1장" in item for item in findings[:1])
+    passed = score >= minimum_score and not any("1장에 독자의 구체적인 고통이 부족합니다" in item for item in findings)
     report = {
         "score": score,
         "minimum_score": minimum_score,

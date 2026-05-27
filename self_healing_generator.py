@@ -1,156 +1,69 @@
 import os
 import sys
 import json
-import requests
 from dotenv import load_dotenv
 from google_sheet_manager import GoogleSheetManager
 from constants import MINDSET_PHILOSOPHY, COVER_HOOK_RULES, OBSIDIAN_VAULT_PATH
 from obsidian_rag import ObsidianRAGEngine
+from codex_text_bridge import read_json_response, write_story_request
 
 # 환경 변수 로드
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-def query_claude_api(prompt):
-    if not CLAUDE_API_KEY:
-        return None
-    print("[Backup AI] Gemini API 장애로 인해 2순위 백업 모델 Claude API를 가동합니다...")
-    url = "https://api.anthropic.com/v1/messages"
-    headers = {
-        "x-api-key": CLAUDE_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-    }
-    payload = {
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 2048,
-        "messages": [{"role": "user", "content": prompt}],
-        "system": "너는 인스타그램에서 조회수를 폭발시키는 마인드팩토리의 수석 카피라이터야. 다른 설명이나 인사 없이 오직 요구된 JSON 데이터만 단 하나 반환해줘."
-    }
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        if res.status_code == 200:
-            return res.json()["content"][0]["text"]
-        else:
-            print(f"[Warning] Claude API 호출 실패 (상태 코드: {res.status_code}): {res.text}")
-    except Exception as e:
-        print(f"[Warning] Claude API 통신 중 오류 발생: {e}")
-    return None
-
-def query_openai_api(prompt):
-    if not OPENAI_API_KEY:
-        return None
-    print("[Backup AI] Gemini/Claude API 장애로 인해 3순위 백업 모델 OpenAI GPT API를 가동합니다...")
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": "너는 인스타그램에서 조회수를 폭발시키는 마인드팩토리의 수석 카피라이터야. 다른 설명이나 인사 없이 오직 요구된 JSON 데이터만 단 하나 반환해줘."},
-            {"role": "user", "content": prompt}
-        ],
-        "response_format": {"type": "json_object"}
-    }
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        if res.status_code == 200:
-            return res.json()["choices"][0]["message"]["content"]
-        else:
-            print(f"[Warning] OpenAI API 호출 실패 (상태 코드: {res.status_code}): {res.text}")
-    except Exception as e:
-        print(f"[Warning] OpenAI API 통신 중 오류 발생: {e}")
-    return None
-
-
-def query_gemini_api(prompt):
-    if not GEMINI_API_KEY:
-        print("[Warning] .env 파일에 GEMINI_API_KEY가 존재하지 않습니다. 자가 복구용 모의 스크립트를 생성합니다.")
-        return None
-        
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
-    
-    try:
-        res = requests.post(url, headers=headers, json=payload, timeout=30)
-        res_data = res.json()
-        if res.status_code == 200:
-            text_response = res_data["candidates"][0]["content"]["parts"][0]["text"]
-            return text_response
-        else:
-            print(f"[Warning] Gemini API 호출 실패 (상태 코드: {res.status_code}): {res_data}")
-            return None
-    except Exception as e:
-        print(f"[Warning] Gemini API 통신 중 오류 발생: {e}")
-        return None
 
 def build_fallback_script(obsidian_context):
     """RAG 맥락을 덧댄 정체성 높은 폴백 script.json 작성 (7장 분량의 고급 매거진 스타일)"""
     print("[Self-Healing] 외부 API 장애 또는 제한을 감지하여 로컬 자가 복구 메커니즘을 가동합니다...")
-    
+
     fallback_data = {
       "title": "규율이라는 고귀한 속박",
       "pages": [
         {
           "page": 1,
           "image_prompt": "Minimalist photography of a single glowing gold line running across a matte black texture, high contrast, elegant serif font feeling, silent atmosphere, low saturation, no text",
-          "heading": "동기부여라는 값싼 자극",
-          "sub_text": "그것은 2시간짜리 오락에 불과하다.",
+          "heading": "무기력과 번아웃의 늪",
+          "sub_text": "침대 위에서 느끼는 비교와 자책의 피로감.",
           "theme_color": "deep_navy"
         },
         {
           "page": 2,
           "image_prompt": "High-end editorial black and white photo of structured stone pillars standing firm against foggy wind, low saturation, high grain, architectural harmony, no text",
-          "heading": "인생을 지배하는 기둥",
-          "sub_text": "성공하는 하루를 만드는 것은 기분이나 날씨가 아닌, 철저한 규율이다.",
+          "heading": "의지가 아닌 시스템의 문제",
+          "sub_text": "원인을 찾으려 힘쓰지 마라. 무너진 일상을 회복하는 시스템을 설계하라.",
           "theme_color": "slate_gray"
         },
         {
           "page": 3,
           "image_prompt": "Minimalist study room with deep navy walls, wooden desk with a single focused vintage lamp illuminating an open book, elegant, quiet, gold point, no text",
-          "heading": "하루 2시간의 진공 상태",
-          "sub_text": "세상의 모든 소음과 스마트폰 불빛을 끄고 오직 단 하나에만 몰입하라.",
+          "heading": "회복을 위한 3단계 몰입 방법",
+          "sub_text": "첫째, 스마트폰을 끄고 지금 할 일 딱 하나에만 10분간 걷기든 쓰기든 시작하라.",
           "theme_color": "cream"
         },
         {
           "page": 4,
           "image_prompt": "Low key low saturation photography of a person's hands carving wood or stone, fine details, focus, craftsmanship, dark slate gray tones, no text",
-          "heading": "불편한 진실과의 마주함",
-          "sub_text": "어제보다 1% 불편한 길을 택하라. 성장은 그 틈에서 피어난다.",
+          "heading": "불편함을 마주하는 원칙",
+          "sub_text": "오늘 회피한 그 고통은 내일 당신의 한계를 가두는 벽이 된다.",
           "theme_color": "deep_navy"
         },
         {
           "page": 5,
           "image_prompt": "Fine art black and white photo of an empty path disappearing into misty trees, high texture, premium mood, silent, no text",
-          "heading": "오늘 회피한 그 고통",
-          "sub_text": "내일 당신의 한계를 가두는 보이지 않는 벽이 된다.",
+          "heading": "가장 확실한 멘탈 루틴",
+          "sub_text": "지금 당장 찬물 한 잔을 마셔라. 신체의 각성이 뇌의 각성을 시작한다.",
           "theme_color": "cream"
         },
         {
           "page": 6,
           "image_prompt": "A sharp beam of light cutting through a dark concrete space, minimal composition, slate gray and cold light, premium architectural photography, no text",
-          "heading": "규율이라는 고귀한 자유",
-          "sub_text": "스스로를 완벽히 통제할 수 있는 자만이 진정한 자유를 얻는다.",
+          "heading": "규율이 만드는 고유한 자유",
+          "sub_text": "스스로를 통제할 때 지친 멘탈은 가장 단단하게 단련된다.",
           "theme_color": "slate_gray"
         },
         {
           "page": 7,
           "image_prompt": "Deep navy background with a thin gold geometric frame at the center, highly elegant and premium magazine layout, gold accents, no text",
-          "heading": "나를 재설계하라",
-          "sub_text": "타협 없는 규율의 미학을 삶에 이식하려면, 이 가이드를 저장하라.",
+          "heading": "나의 규율 선언 템플릿",
+          "sub_text": "이 가이드를 저장하고, 삶이 무너지는 날 꺼내어 다시 기억해 보세요.",
           "theme_color": "deep_navy"
         }
       ]
@@ -185,46 +98,46 @@ def main():
     print("="*60)
     print(" MindFactory Self-Healing Content Generator (Obsidian RAG V4) ")
     print("="*60)
-    
+
     # 1. 브랜드 철학 로드
     print("\n[Step 1] 마인드팩토리 고유 철학 가이드 로드 중...")
     philosophy_str = json.dumps(MINDSET_PHILOSOPHY, ensure_ascii=False, indent=2)
     hook_rules_str = json.dumps(COVER_HOOK_RULES, ensure_ascii=False, indent=2)
-    
+
     # 2. 구글 시트 성과 데이터 추출
     gsm = GoogleSheetManager()
-    
+
     print("\n[Step 2] 구글 시트 성과 지표(상/하위 3개) 분석 중...")
     top_posts = gsm.get_top_posts(limit=3)
     bottom_posts = gsm.get_bottom_posts(limit=3)
-    
+
     top_context = ""
     print("  - 성공 사례 (상위 조회수):")
     for idx, post in enumerate(top_posts, start=1):
         print(f"    {idx}. {post.get('타이틀')} (조회수: {post.get('조회수')}회)")
         top_context += f"제목: {post.get('타이틀')} / 본문: {post.get('본문내용')} (조회수: {post.get('조회수')}회)\n"
-        
+
     bottom_context = ""
     print("  - 실패 사례 (하위 조회수):")
     for idx, post in enumerate(bottom_posts, start=1):
         print(f"    {idx}. {post.get('타이틀')} (조회수: {post.get('조회수')}회)")
         bottom_context += f"제목: {post.get('타이틀')} / 본문: {post.get('본문내용')} (조회수: {post.get('조회수')}회)\n"
-        
+
     # 3. [NEW] 옵시디언 로컬 보관소 RAG 정보 조회
     print("\n[Step 3] 옵시디언 뇌(RAG) 검색 가동...")
     # 조회수 1위 성공 사례 타이틀 키워드를 쿼리로 사용해 내 생각 노트를 역추적 검색
     search_query = "규율 성장 몰입"
     if top_posts:
         search_query = top_posts[0].get("타이틀", "규율 성장 몰입")
-        
+
     rag = ObsidianRAGEngine(vault_path=OBSIDIAN_VAULT_PATH)
     obsidian_context = rag.retrieve_context(search_query, k=3)
-    
+
     if obsidian_context:
         print("  - 유사도 검색 완료! 매칭된 생각 노트 컨텍스트 확보.")
     else:
         print("  - [Info] 검색 결과가 비어 있거나 로컬 경로 부재로 RAG 컨텍스트를 스킵합니다.")
-        
+
     # 3.5 [NEW] 자가치유 피드백 분석 보고서 로드
     strategy_context = ""
     strategy_file = "self_healing_strategy.json"
@@ -235,11 +148,11 @@ def main():
             analysis = strategy_data.get("analysis", "")
             action_items = strategy_data.get("action_items", "")
             prompt_injection = strategy_data.get("prompt_injection", "")
-            
+
             print(f"\n🧠 [자가치유 연동] 직전 피드백 분석 결과가 있습니다. 대본 기획에 강제 반영합니다.")
             print(f"  - 저조 원인 분석: {analysis}")
             print(f"  - 개선 액션 아이템: {action_items}")
-            
+
             strategy_context = f"""
 ======================================================
 🚨 [실시간 자가치유 피드백 개선 지침]
@@ -353,34 +266,16 @@ def main():
 }}
 """
 
-    # 5. Gemini API 호출 또는 자가 치유 폴백 실행
-    print("\n[Step 4] RAG 결합형 대본 생성 중...")
-    raw_response = query_gemini_api(prompt)
-    
-    # 2순위 백업 체인 구동
-    if not raw_response:
-        raw_response = query_claude_api(prompt)
-    if not raw_response:
-        raw_response = query_openai_api(prompt)
-        
-    script_data = None
-    if raw_response:
-        try:
-            cleaned_response = raw_response.strip()
-            if cleaned_response.startswith("```json"):
-                cleaned_response = cleaned_response[7:]
-            if cleaned_response.endswith("```"):
-                cleaned_response = cleaned_response[:-3]
-            cleaned_response = cleaned_response.strip()
-            
-            script_data = json.loads(cleaned_response)
-            print("✅ AI API를 통해 옵시디언 RAG 맞춤형 대본 생성을 성공적으로 완료했습니다.")
-        except Exception as e:
-            print(f"[Warning] 생성 데이터 파싱 에러: {e}. 로컬 자가치유 폴백을 구동합니다.")
-            script_data = build_fallback_script(obsidian_context)
+    # 5. Antigravity 요청 파일 생성 및 응답 파일 확인
+    print("\n[Step 4] Antigravity 중심 대본 생성 요청 준비...")
+    script_data = write_story_request(prompt) or read_json_response("codex_story_response.json")
+
+    if script_data:
+        print("✅ Antigravity 응답 JSON을 읽어 대본 생성을 완료했습니다.")
     else:
+        print("[Antigravity] codex_story_response.json이 없어 로컬 폴백 대본을 사용합니다.")
         script_data = build_fallback_script(obsidian_context)
-        
+
     # 6. script.json 파일로 저장
     output_file = "script.json"
     try:

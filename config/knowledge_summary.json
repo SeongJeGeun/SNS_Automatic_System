@@ -1,0 +1,18 @@
+{
+  "system_principles": {
+    "completion_rate_optimization": "Maintain 7 slides for story structure to optimize viewer dwell time.",
+    "primary_metric_focus": "Sends (DM shares) and Saves. Like count is secondary.",
+    "alt_text_rules": "Always write semantic alt text for target user categorization by the algorithm."
+  },
+  "content_formulas": {
+    "give_to_ask_ratio": "3:1 (Three empathy/story cards to one action/sales prompt)",
+    "maximum_lines_per_card": 2,
+    "first_card_hook": "Negative instinct stimulation or loss avoidance copy only."
+  },
+  "visual_specifications": {
+    "contrast_ratio": "High contrast text over darkened background overlay",
+    "background_overlay_opacity": 0.75,
+    "blur_radius_pixels": 15,
+    "theme_colors": ["deep_navy", "slate_gray", "cream"]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "당신은 게으른 게 아니라 너무 오래 버틴 걸 수도 있다",
+  "topic": "번아웃과 자기비난",
+  "target_emotion": "안도감과 자기이해",
+  "pages": [
+    {
+      "page_number": 1,
+      "heading": "당신은 게으른 게 아니라\n너무 오래 버틴 걸 수도 있다",
+      "sub_text": "자꾸 스스로를 탓하고 있다면, 먼저 이 말부터 기억했으면 좋겠어요.",
+      "image_prompt": "soft emotional background, exhausted office worker sitting quietly by window, muted tones, calm atmosphere, negative space for text",
+      "theme_color": "muted blue-gray"
+    },
+    {
+      "page_number": 2,
+      "heading": "해야 할 일은 많은데\n몸이 먼저 멈춰버릴 때가 있죠",
+      "sub_text": "의지가 약해서가 아니라, 이미 오래전부터 에너지가 바닥났을 수 있어요.",
+      "image_prompt": "minimal room scene, unfinished to-do notes, tired mood, low stimulation composition, soft light",
+      "theme_color": "dusty gray"
+    }
+  ]
+}

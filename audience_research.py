@@ -59,11 +59,11 @@ def read_recent_local_trends(vault_path="obsidian_vault", limit=4):
     return snippets
 
 
-def build_antigravity_research_brief(insight, output_file="antigravity_research_brief.md"):
+def build_codex_research_brief(insight, output_file="codex_research_brief.md"):
     lines = [
-        "# Antigravity Research Brief",
+        "# Codex Research Brief",
         "",
-        "아래 검색/추론은 외부 API를 직접 붙이지 않고, 안티그래비티 내장 검색과 추론으로 수행하기 위한 작업 지시서입니다.",
+        "아래 검색/추론은 외부 API를 직접 붙이지 않고, Codex 내장 검색과 추론으로 수행하기 위한 작업 지시서입니다.",
         "",
         "## 목표",
         "요즘 사람들이 어떤 삶을 살고 무엇 때문에 지치는지 파악한 뒤, 공감과 동기부여가 동시에 가능한 카드뉴스 주제를 도출한다.",
@@ -93,8 +93,8 @@ def create_audience_insight(output_file="audience_insight.json"):
     local_trends = read_recent_local_trends()
     insight = {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "research_mode": "local_seed_plus_antigravity_brief",
-        "antigravity_search_queries": PAIN_SIGNAL_QUERIES,
+        "research_mode": "local_seed_plus_codex_brief",
+        "codex_search_queries": PAIN_SIGNAL_QUERIES,
         "local_trend_sources": local_trends,
         **DEFAULT_AUDIENCE_INSIGHT,
     }
@@ -102,9 +102,9 @@ def create_audience_insight(output_file="audience_insight.json"):
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(insight, f, ensure_ascii=False, indent=2)
 
-    build_antigravity_research_brief(insight)
+    build_codex_research_brief(insight)
     print(f"[Audience Agent] audience insight 생성 완료: {output_file}")
-    print("[Audience Agent] 안티그래비티 조사 지시서 생성 완료: antigravity_research_brief.md")
+    print("[Audience Agent] Codex 조사 지시서 생성 완료: codex_research_brief.md")
     return insight
 
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mindfactory.pipeline3h</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/SNS_Automatic_System/scripts/run_codex_pipeline_3h.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/SNS_Automatic_System</string>
+  <key>StandardOutPath</key>
+  <string>/path/to/SNS_Automatic_System/agent_runs/codex_pipeline_3h.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/SNS_Automatic_System/agent_runs/codex_pipeline_3h.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>10800</integer>
+</dict>
+</plist>

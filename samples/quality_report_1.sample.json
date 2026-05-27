@@ -1,0 +1,20 @@
+{
+  "scores": {
+    "reality_resonance": 5,
+    "hook_strength": 4,
+    "specificity": 4,
+    "save_value": 5,
+    "story_flow": 4,
+    "non_cliche_score": 4
+  },
+  "passed": true,
+  "revisions_required": [],
+  "major_issues": [],
+  "minor_issues": [
+    "4 페이지 문장은 조금 길어서 카드 가독성을 위해 더 줄일 수 있음"
+  ],
+  "recommended_fixes": [
+    "4 페이지 sub_text 를 한 문장 더 짧게 다듬기"
+  ],
+  "summary": "현실 공감과 저장 가치가 높고, 전반적으로 감정선이 안정적이다. 일부 문장만 더 간결하게 다듬으면 완성도가 높아진다."
+}

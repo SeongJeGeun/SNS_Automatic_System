@@ -1,0 +1,14 @@
+{
+  "topic_selection_rationale": {
+    "target_pain_point": "Planning addiction without execution",
+    "resonance_evidence": "2030 users frequently search for planning tips, but suffer from burnout/procrastination due to excessive decision fatigue."
+  },
+  "structure_design_rationale": {
+    "slide_count_reason": "7 slides provide the ideal pacing for the 'Give, Give, Give, Ask' model. Explains the problem first, shifts perspective, and ends with a high-utility template.",
+    "save_utility_trigger": "Slide 7 acts as an interactive 'fill-in-the-blank' declaration template, maximizing the user's intent to save and re-read later."
+  },
+  "behavioral_share_triggers": {
+    "altruistic_motivation": "Users feel that sharing this post with friends who also struggle with procrastination ('procrastinator friends') is helpful rather than preachy.",
+    "identity_expression": "Sharing the 'Self-Discipline Rule' on stories allows the user to declare their identity as someone striving for systematic routine."
+  }
+}
