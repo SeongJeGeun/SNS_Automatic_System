@@ -1,0 +1,26 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local secrets and OAuth credentials
+.env
+token.json
+client_secrets.json
+google_creds.json
+
+# Generated runtime artifacts
+page*.png
+generated_backgrounds/
+agent_runs/
+self_healing_strategy.json
+audience_insight.json
+content_strategy.json
+content_quality_report.json
+content_quality_feedback.json
+antigravity_research_brief.md
+antigravity_strategy_brief.md
+antigravity_image_requests.md
+report_sent_*.txt
+
+# Local vector DB/cache
+faiss_index/

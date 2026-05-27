@@ -1,0 +1,28 @@
+{
+  "project_name": "MindFactory",
+  "last_updated": "2026-05-27T02:45:00Z",
+  "history": [
+    {
+      "date": "2026-05-26",
+      "topic": "2026 AI 트렌드: 에이전트 AI",
+      "status": "SUCCESS",
+      "response_code": 200,
+      "details": {
+        "instagram_post_id": "17841436434753995_123456789",
+        "carousel_items": 5,
+        "error_message": null
+      }
+    },
+    {
+      "date": "2026-05-27",
+      "topic": "자기계발 10계명",
+      "status": "FAILED",
+      "response_code": 400,
+      "details": {
+        "instagram_post_id": null,
+        "carousel_items": 0,
+        "error_message": "Error 190: Access token has expired"
+      }
+    }
+  ]
+}

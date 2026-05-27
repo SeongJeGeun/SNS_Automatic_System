@@ -1,0 +1,54 @@
+{
+  "title": "규율이라는 고귀한 속박",
+  "pages": [
+    {
+      "page": 1,
+      "image_prompt": "Minimalist photography of a single glowing gold line running across a matte black texture, high contrast, elegant serif font feeling, silent atmosphere, low saturation, no text",
+      "heading": "동기부여라는 값싼 자극",
+      "sub_text": "그것은 2시간짜리 오락에 불과하다.",
+      "theme_color": "deep_navy"
+    },
+    {
+      "page": 2,
+      "image_prompt": "High-end editorial black and white photo of structured stone pillars standing firm against foggy wind, low saturation, high grain, architectural harmony, no text",
+      "heading": "인생을 지배하는 기둥",
+      "sub_text": "성공하는 하루를 만드는 것은 기분이나 날씨가 아닌, 철저한 규율이다.",
+      "theme_color": "slate_gray"
+    },
+    {
+      "page": 3,
+      "image_prompt": "Minimalist study room with deep navy walls, wooden desk with a single focused vintage lamp illuminating an open book, elegant, quiet, gold point, no text",
+      "heading": "하루 2시간의 진공 상태",
+      "sub_text": "세상의 모든 소음과 스마트폰 불빛을 끄고 오직 단 하나에만 몰입하라.",
+      "theme_color": "cream"
+    },
+    {
+      "page": 4,
+      "image_prompt": "Low key low saturation photography of a person's hands carving wood or stone, fine details, focus, craftsmanship, dark slate gray tones, no text",
+      "heading": "불편한 진실과의 마주함",
+      "sub_text": "어제보다 1% 불편한 길을 택하라. 성장은 그 틈에서 피어난다.",
+      "theme_color": "deep_navy"
+    },
+    {
+      "page": 5,
+      "image_prompt": "Fine art black and white photo of an empty path disappearing into misty trees, high texture, premium mood, silent, no text",
+      "heading": "오늘 회피한 그 고통",
+      "sub_text": "내일 당신의 한계를 가두는 보이지 않는 벽이 된다.",
+      "theme_color": "cream"
+    },
+    {
+      "page": 6,
+      "image_prompt": "A sharp beam of light cutting through a dark concrete space, minimal composition, slate gray and cold light, premium architectural photography, no text",
+      "heading": "규율이라는 고귀한 자유",
+      "sub_text": "스스로를 완벽히 통제할 수 있는 자만이 진정한 자유를 얻는다.",
+      "theme_color": "slate_gray"
+    },
+    {
+      "page": 7,
+      "image_prompt": "Deep navy background with a thin gold geometric frame at the center, highly elegant and premium magazine layout, gold accents, no text",
+      "heading": "나를 재설계하라",
+      "sub_text": "타협 없는 규율의 미학을 삶에 이식하려면, 이 가이드를 저장하라.",
+      "theme_color": "deep_navy"
+    }
+  ]
+}
