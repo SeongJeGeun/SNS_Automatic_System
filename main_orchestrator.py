@@ -45,6 +45,10 @@ def get_run_mode():
     return os.getenv("RUN_MODE", "research").strip().lower()
 
 
+def get_rag_mode():
+    return os.getenv("RAG_MODE", "search").strip().lower()
+
+
 def should_skip_image_generation():
     return env_bool("SKIP_IMAGE_GENERATION", get_run_mode() == "research")
 
@@ -59,6 +63,35 @@ def should_skip_instagram_publish():
 
 def should_skip_threads_image_publish():
     return env_bool("SKIP_THREADS_IMAGE_PUBLISH", get_run_mode() == "research")
+
+
+def should_rebuild_rag_index():
+    return get_rag_mode() in {"rebuild", "incremental", "build"}
+
+
+def run_rag_memory_step():
+    """Use Obsidian as memory without blocking every 6-hour cycle on full indexing."""
+    rag_mode = get_rag_mode()
+    if rag_mode in {"off", "skip", "none"}:
+        print("[RAG] RAG_MODE=off → 옵시디언 RAG 단계를 건너뜁니다.")
+        return
+
+    try:
+        with agent_step("RAG Agent", f"옵시디언 메모 처리 ({rag_mode})"):
+            from constants import OBSIDIAN_VAULT_PATH
+            print(f"\n[RAG] 모드: {rag_mode}")
+            print(f"[RAG] 옵시디언 보관소: {OBSIDIAN_VAULT_PATH}")
+
+            if should_rebuild_rag_index():
+                print("[RAG] 인덱스 빌드/갱신을 실행합니다. 시간이 오래 걸릴 수 있습니다.")
+                from obsidian_rag import ObsidianRAGEngine
+                rag = ObsidianRAGEngine(vault_path=OBSIDIAN_VAULT_PATH)
+                rag.build_or_update_db()
+                print("[RAG] 인덱스 빌드/갱신 완료")
+            else:
+                print("[RAG] RAG_MODE=search → 기존 인덱스/옵시디언 메모를 두뇌로 유지하되, 매 회차 전체 재인덱싱은 하지 않습니다.")
+    except Exception as e:
+        print(f"[Warning] 옵시디언 RAG 단계 실패. 파이프라인은 계속 진행합니다: {e}")
 
 
 def get_dynamic_wait_seconds(default_seconds):
@@ -599,16 +632,8 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Warning] 인사이트 업데이트/전략 반영 단계 실패: {e}")
 
-    # 옵시디언 RAG 인덱싱
-    try:
-        with agent_step("RAG Agent", "옵시디언 메모 인덱싱"):
-            print("\n[RAG] 대본 기획 전 옵시디언 보관소 실시간 인덱싱 가동...")
-            from obsidian_rag import ObsidianRAGEngine
-            from constants import OBSIDIAN_VAULT_PATH
-            rag = ObsidianRAGEngine(vault_path=OBSIDIAN_VAULT_PATH)
-            rag.build_or_update_db()
-    except Exception as e:
-        print(f"[Warning] 옵시디언 RAG DB 자동 인덱싱 실패: {e}")
+    # 옵시디언 RAG 메모리 처리
+    run_rag_memory_step()
 
     # 5. 오디언스 분석
     try:
