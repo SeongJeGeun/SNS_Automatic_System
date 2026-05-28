@@ -7,7 +7,7 @@ def build_quality_wrapper(app, eval_once):
     max_strategy_rounds = int(os.getenv("MAX_STRATEGY_REANALYSIS", "1"))
 
     def wrapped_eval():
-        run_script_alignment_check()
+        ensure_script_alignment(app)
         for attempt in range(1, max_retries + 2):
             if eval_once():
                 return True
@@ -15,7 +15,7 @@ def build_quality_wrapper(app, eval_once):
                 break
             print(f"[Quality Loop] retry script generation {attempt}/{max_retries}")
             app.run_generator_script(diversify=True)
-            run_script_alignment_check()
+            ensure_script_alignment(app)
 
         for round_no in range(1, max_strategy_rounds + 1):
             print(f"[Quality Loop] refresh strategy context {round_no}/{max_strategy_rounds}")
@@ -33,7 +33,7 @@ def build_quality_wrapper(app, eval_once):
             except Exception as exc:
                 print(f"[Quality Loop] strategy refresh skipped: {exc}")
             app.run_generator_script(diversify=True)
-            run_script_alignment_check()
+            ensure_script_alignment(app)
             for attempt in range(1, max_retries + 2):
                 if eval_once():
                     return True
@@ -41,7 +41,7 @@ def build_quality_wrapper(app, eval_once):
                     break
                 print(f"[Quality Loop] retry after refresh {attempt}/{max_retries}")
                 app.run_generator_script(diversify=True)
-                run_script_alignment_check()
+                ensure_script_alignment(app)
 
         print("[Quality Loop] final status: research_failed_quality")
         try:
@@ -107,6 +107,29 @@ def run_script_alignment_check():
     except Exception as exc:
         print(f"[Script Alignment] skipped: {exc}")
         return None
+
+
+def ensure_script_alignment(app):
+    """Retry generation when CEO guidance and script are not aligned.
+
+    Still non-blocking: if alignment cannot be achieved, publish flow continues
+    and the alignment report remains as an audit artifact.
+    """
+    report = run_script_alignment_check()
+    if not report or report.get("ok"):
+        return report
+
+    max_attempts = int(os.getenv("MAX_SCRIPT_ALIGNMENT_RETRIES", "3"))
+    for attempt in range(1, max_attempts + 1):
+        print(f"[Script Alignment] mismatch -> regenerate script {attempt}/{max_attempts}")
+        app.run_generator_script(diversify=True)
+        report = run_script_alignment_check()
+        if report and report.get("ok"):
+            print("[Script Alignment] recovered after regeneration")
+            return report
+
+    print("[Script Alignment] mismatch remains after retry limit; continue with warning")
+    return report
 
 
 def _interval_seconds():
