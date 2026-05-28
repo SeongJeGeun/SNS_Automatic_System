@@ -37,7 +37,7 @@ class LocalLLMRouter:
         self.provider = os.getenv("LOCAL_LLM_PROVIDER", "ollama")
         self.base_url = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434/v1")
         self.api_key = os.getenv("LOCAL_LLM_API_KEY", "ollama")
-        self.model = os.getenv("LOCAL_LLM_MODEL", "qwen3:30b")
+        self.model = os.getenv("LOCAL_LLM_MODEL", "gemma4:26b")
         self.timeout = float(os.getenv("LOCAL_LLM_TIMEOUT_SECONDS", "120"))
 
     def _client(self):
