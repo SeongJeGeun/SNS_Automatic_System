@@ -74,31 +74,118 @@ def _write_json(path: str, data: Dict[str, Any]) -> None:
         f.write("\n")
 
 
+def _md_value(value: Any, fallback: str = "없음") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, bool):
+        return "예" if value else "아니오"
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item) for item in value) if value else fallback
+    text = str(value).strip()
+    return text or fallback
+
+
+def _status_icon(value: Any) -> str:
+    text = str(value or "").lower()
+    if text in {"active", "success", "ok", "true"}:
+        return "정상"
+    if text in {"cooldown", "waiting"}:
+        return "대기"
+    if text in {"failed", "error", "false"}:
+        return "주의"
+    return "확인 필요"
+
+
 def _write_markdown(path: str, report: Dict[str, Any]) -> None:
+    """Write a human-readable CEO report for Telegram/Obsidian review.
+
+    This report is intentionally file-only. It does not send Telegram messages
+    and does not mutate the publish pipeline.
+    """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    topic = report.get("topic_guidance", {})
-    memory = topic.get("memory_signal", {}) if isinstance(topic, dict) else {}
+    state = report.get("state", {}) if isinstance(report.get("state"), dict) else {}
+    topic = report.get("topic_guidance", {}) if isinstance(report.get("topic_guidance"), dict) else {}
+    memory = topic.get("memory_signal", {}) if isinstance(topic.get("memory_signal"), dict) else {}
+    llm = report.get("llm", {}) if isinstance(report.get("llm"), dict) else {}
+    worker_results = report.get("worker_results", {}) if isinstance(report.get("worker_results"), dict) else {}
+
+    instagram_state = state.get("instagram_state")
+    threads_state = state.get("threads_state")
+    recommendation = report.get("ceo_recommendation") or "로컬 LLM 추천이 생성되지 않았습니다. fallback 운영 지시를 사용하세요."
+
     lines = [
-        "# CEO Cycle Dry-run Report",
+        "# CEO 운영 보고서",
         "",
-        f"- created_at: {report.get('created_at')}",
-        f"- mode: {report.get('mode')}",
-        f"- local_model: {report.get('llm', {}).get('model')}",
-        f"- instagram_state: {report.get('state', {}).get('instagram_state')}",
-        f"- threads_state: {report.get('state', {}).get('threads_state')}",
-        f"- recent_topic: {report.get('state', {}).get('recent_topic')}",
-        f"- next_topic: {topic.get('topic_title')}",
-        f"- emotion_axis: {topic.get('emotion_axis')}",
-        f"- weekday_slot: {topic.get('weekday_slot')}",
-        f"- selected_by: {topic.get('selected_by')}",
-        f"- memory_recent_templates: {memory.get('recent_template_ids')}",
-        f"- memory_recent_emotions: {memory.get('recent_emotion_axes')}",
+        "## 1. 운영 요약",
         "",
-        "## CEO Recommendation",
+        f"- 생성 시각: {_md_value(report.get('created_at'))}",
+        f"- 모드: {_md_value(report.get('mode'))}",
+        f"- 로컬 모델: {_md_value(llm.get('model'))}",
+        f"- 오늘 요일 슬롯: {_md_value(state.get('today_weekday_slot'))}",
+        f"- 최근 주제: {_md_value(state.get('recent_topic'))}",
+        f"- Decision Memory 기록 수: {_md_value(state.get('decision_memory_count'), '0')}",
         "",
-        report.get("ceo_recommendation") or "No recommendation generated.",
+        "## 2. 플랫폼 상태",
         "",
+        "| 플랫폼 | 상태 | 판단 |",
+        "|---|---:|---|",
+        f"| Instagram | {_md_value(instagram_state)} | {_status_icon(instagram_state)} |",
+        f"| Threads | {_md_value(threads_state)} | {_status_icon(threads_state)} |",
+        "",
+        "## 3. 다음 회차 선택 주제",
+        "",
+        f"- 주제: {_md_value(topic.get('topic_title'))}",
+        f"- topic_key: `{_md_value(topic.get('topic_key'))}`",
+        f"- 감정 축: {_md_value(topic.get('emotion_axis'))}",
+        f"- 시리즈: {_md_value(topic.get('series_name'))}",
+        f"- 이번 편 역할: {_md_value(topic.get('episode_role'))}",
+        f"- 다음 편 예고: {_md_value(topic.get('next_episode_hint'))}",
+        f"- 선정 기준: {_md_value(topic.get('selected_by'))}",
+        f"- 메모리 위험도: {_md_value(topic.get('memory_risk'), '0')}",
+        f"- 선정 이유: {_md_value(topic.get('why_now'))}",
+        "",
+        "## 4. Decision Memory 신호",
+        "",
+        f"- 최근 template_id: {_md_value(memory.get('recent_template_ids'))}",
+        f"- 최근 감정 축: {_md_value(memory.get('recent_emotion_axes'))}",
+        f"- 약한 template_id: {_md_value(memory.get('weak_template_ids'))}",
+        f"- 약한 감정 축: {_md_value(memory.get('weak_emotion_axes'))}",
+        f"- 정합성 실패 주제: {_md_value(memory.get('alignment_failed_topics'))}",
+        "",
+        "## 5. 다음 실행 지시",
+        "",
+        "1. Instagram이 cooldown이면 컨테이너 생성 없이 선제 skip합니다.",
+        "2. Threads는 텍스트 중심으로 계속 발행합니다.",
+        "3. 최근 template_id와 감정 축 반복을 피합니다.",
+        "4. script alignment가 실패하면 generator 재시도 후 감사 로그를 남깁니다.",
+        "5. 발행 후 decision_memory.jsonl에 결과를 누적합니다.",
+        "",
+        "## 6. CEO 추천 문장",
+        "",
+        recommendation,
+        "",
+        "## 7. Worker 상태",
+        "",
+        "| Worker | OK | 요약 |",
+        "|---|---:|---|",
     ]
+
+    if worker_results:
+        for name, result in worker_results.items():
+            if not isinstance(result, dict):
+                continue
+            lines.append(f"| {name} | {_md_value(result.get('ok'))} | {_md_value(result.get('summary'))} |")
+    else:
+        lines.append("| 없음 | - | worker 결과 없음 |")
+
+    lines.extend([
+        "",
+        "---",
+        "",
+        "이 보고서는 CEO dry-run 결과입니다. Telegram 자동 발송은 하지 않습니다.",
+        "",
+    ])
+
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
