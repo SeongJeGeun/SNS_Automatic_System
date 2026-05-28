@@ -74,6 +74,28 @@ def install_unique_generator_wrapper(app):
     app.run_generator_script = unique_run_generator
 
 
+def run_template_pack_validation():
+    """Validate CEO topic pool and content template pack compatibility.
+
+    Warning-only by default. If STRICT_TEMPLATE_PACK_VALIDATION=true, failure
+    raises and stops this wrapper before the expensive publish cycle.
+    """
+    if os.getenv("ENABLE_TEMPLATE_PACK_VALIDATION", "true").lower() != "true":
+        print("[Template Pack Validator] disabled")
+        return None
+    try:
+        import template_pack_validator
+        report = template_pack_validator.validate_template_packs()
+        if report and not report.get("ok") and os.getenv("STRICT_TEMPLATE_PACK_VALIDATION", "false").lower() == "true":
+            raise RuntimeError(f"template pack validation failed: {report.get('errors')}")
+        return report
+    except Exception as exc:
+        print(f"[Template Pack Validator] skipped: {exc}")
+        if os.getenv("STRICT_TEMPLATE_PACK_VALIDATION", "false").lower() == "true":
+            raise
+        return None
+
+
 def run_ceo_guidance_preflight():
     """Generate CEO topic guidance before the publish cycle.
 
@@ -166,6 +188,7 @@ def main():
     os.environ["MAX_STRATEGY_REANALYSIS"] = os.getenv("MAX_STRATEGY_REANALYSIS", "1")
     os.environ["RUN_ONCE"] = "true"
 
+    run_template_pack_validation()
     run_ceo_guidance_preflight()
 
     import content_evaluator
@@ -183,6 +206,7 @@ def main():
     print("[Cycle Wrapper] script uniqueness guard enabled")
     print("[Cycle Wrapper] CEO topic guidance preflight enabled")
     print("[Cycle Wrapper] script alignment guard enabled")
+    print("[Cycle Wrapper] template pack validation enabled")
     main_orchestrator.run_orchestration_loop()
     _patch_pipeline_interval(main_orchestrator, "waiting")
 
