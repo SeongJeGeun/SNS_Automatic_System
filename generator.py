@@ -7,9 +7,12 @@ from datetime import datetime
 
 PAIN_WORDS = ["피곤", "무기력", "불안", "자책", "번아웃", "비교", "막막", "무너", "힘들", "지친", "압박", "뒤처", "침대", "루틴"]
 ACTION_WORDS = ["오늘", "지금", "딱", "하나", "10분", "물", "걷", "쓰기", "끄고", "시작", "루틴"]
+CEO_TOPIC_GUIDANCE_FILE = os.path.join("agent_runs", "ceo_topic_guidance.json")
 
 TOPIC_TEMPLATES = [
     {
+        "template_id": "small_routine_recovery",
+        "topic_keys": ["execution_barrier", "routine_recovery"],
         "title": "작은 루틴이 무너진 하루를 구한다",
         "pain_heading": "계속 미루고 자책하고 있나요?",
         "pain_sub": "불안한데 시작은 안 되고, 비교만 하다 하루가 끝나는 밤.",
@@ -28,6 +31,8 @@ TOPIC_TEMPLATES = [
         "tags": "#루틴 #자기계발 #번아웃회복 #시작습관 #마인드팩토리",
     },
     {
+        "template_id": "comparison_detox",
+        "topic_keys": ["comparison_anxiety"],
         "title": "비교가 심한 날 나를 다시 잡는 법",
         "pain_heading": "남들은 앞서가는데 나만 멈춘 것 같나요?",
         "pain_sub": "피곤한데도 쉬면 뒤처질까 불안해서 계속 자책하는 하루.",
@@ -46,6 +51,8 @@ TOPIC_TEMPLATES = [
         "tags": "#비교습관 #불안관리 #루틴회복 #멘탈관리 #마인드팩토리",
     },
     {
+        "template_id": "burnout_reset",
+        "topic_keys": ["burnout_recovery"],
         "title": "번아웃 직전의 하루를 회복하는 10분",
         "pain_heading": "쉬어도 피곤하고 시작도 두렵나요?",
         "pain_sub": "침대에 누워도 마음은 불안하고, 해야 할 일은 계속 쌓입니다.",
@@ -62,6 +69,26 @@ TOPIC_TEMPLATES = [
         "cta_heading": "저장용 체크리스트: 회복 10분",
         "cta_sub": "저장하고 번아웃이 오는 날 그대로 따라 하세요. 완료 인증 환영.",
         "tags": "#번아웃 #회복루틴 #무기력탈출 #자기관리 #마인드팩토리",
+    },
+    {
+        "template_id": "lonely_night_reset",
+        "topic_keys": ["lonely_night_reset"],
+        "title": "혼자 무너지는 밤을 넘기는 방법",
+        "pain_heading": "밤만 되면 마음이 더 무거워지나요?",
+        "pain_sub": "연락할 사람은 없고, 불안한 생각만 커지는 조용한 밤.",
+        "reframe_heading": "외로움은 실패가 아니라 신호입니다",
+        "reframe_sub": "나를 몰아붙이라는 뜻이 아니라 다시 돌보라는 알림입니다.",
+        "tip_heading": "3단계 방법: 밤을 작게 통과하기",
+        "tip_sub": "1단계 조명 낮추기, 2단계 생각 적기, 3단계 내일 할 일 하나만 정하기.",
+        "summary_heading": "오늘의 원칙은 밤을 이기려 하지 않기",
+        "summary_sub": "힘든 밤에는 결론을 내리지 말고 내일의 나에게 넘기세요.",
+        "identity_heading": "단단함은 혼자 버티는 능력이 아닙니다",
+        "identity_sub": "무너지는 순간에도 나를 해치지 않는 선택을 하는 것.",
+        "action_heading": "지금 생각 하나만 종이에 옮기세요",
+        "action_sub": "머릿속에서 꺼내 적으면 감정의 크기가 조금 줄어듭니다.",
+        "cta_heading": "저장용 문장: 오늘은 결론 내리지 않기",
+        "cta_sub": "밤에 무너질 때 다시 보세요. 댓글에 '내일로 넘김'이라고 남기기.",
+        "tags": "#외로움 #밤불안 #자기회복 #감정관리 #마인드팩토리",
     },
 ]
 
@@ -115,7 +142,30 @@ def _page(page, role, heading, sub_text, image_prompt, layout_hint):
     }
 
 
+def _load_ceo_topic_guidance():
+    guidance = _load_json(CEO_TOPIC_GUIDANCE_FILE, {})
+    if isinstance(guidance, dict) and guidance.get("topic_key"):
+        return guidance
+    return {}
+
+
+def _template_for_guidance(guidance):
+    topic_key = guidance.get("topic_key")
+    if not topic_key:
+        return None
+    for template in TOPIC_TEMPLATES:
+        if topic_key in template.get("topic_keys", []):
+            return template
+    return None
+
+
 def _select_template(strategy, audience, diversify):
+    guidance = _load_ceo_topic_guidance()
+    guided_template = _template_for_guidance(guidance)
+    if guided_template:
+        print(f"[Generator] CEO topic guidance applied: {guidance.get('topic_title')}")
+        return guided_template, guidance
+
     seed_basis = "|".join([
         datetime.now().strftime("%Y%m%d%H"),
         _as_text(strategy.get("theme") if isinstance(strategy, dict) else ""),
@@ -125,7 +175,7 @@ def _select_template(strategy, audience, diversify):
         "diversify" if diversify else "normal",
     ])
     rng = random.Random(seed_basis)
-    return rng.choice(TOPIC_TEMPLATES)
+    return rng.choice(TOPIC_TEMPLATES), guidance
 
 
 def _build_pages(template):
@@ -144,12 +194,14 @@ def generate_script(diversify=False):
     audience = _load_json("audience_insight.json", {})
     strategy = _load_json("content_strategy.json", {})
     healing = _load_json("self_healing_strategy.json", {}) if diversify else {}
-    template = _select_template(strategy, audience, diversify)
+    template, ceo_guidance = _select_template(strategy, audience, diversify)
 
     theme = _pick_first(strategy, ["theme", "topic", "next_direction"], template["title"])
     hook_strategy = _pick_first(strategy, ["hook", "hook_strategy", "headline"], template["reframe_sub"])
 
-    if theme == "규율이라는 고귀한 속박":
+    if ceo_guidance.get("topic_title"):
+        title = _clean_sentence(ceo_guidance["topic_title"], 34)
+    elif theme == "규율이라는 고귀한 속박":
         title = template["title"]
     else:
         title = _clean_sentence(theme, 34)
@@ -175,13 +227,17 @@ def generate_script(diversify=False):
             "pain_words": PAIN_WORDS,
             "action_words": ACTION_WORDS,
             "structure": "pain hook -> cause reframe -> 3-step tips -> identity shift -> challenge CTA",
+            "template_id": template.get("template_id"),
             "template_title": template["title"],
+            "ceo_topic_key": ceo_guidance.get("topic_key"),
+            "ceo_emotion_axis": ceo_guidance.get("emotion_axis"),
         },
         "source": {
             "audience_insight": os.path.exists("audience_insight.json"),
             "content_strategy": os.path.exists("content_strategy.json"),
             "self_healing_strategy": bool(healing),
             "template_rotation": True,
+            "ceo_topic_guidance": bool(ceo_guidance),
         },
         "pages": pages,
     }
