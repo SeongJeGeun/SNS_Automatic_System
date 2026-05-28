@@ -7,6 +7,7 @@ def build_quality_wrapper(app, eval_once):
     max_strategy_rounds = int(os.getenv("MAX_STRATEGY_REANALYSIS", "1"))
 
     def wrapped_eval():
+        run_script_alignment_check()
         for attempt in range(1, max_retries + 2):
             if eval_once():
                 return True
@@ -14,6 +15,7 @@ def build_quality_wrapper(app, eval_once):
                 break
             print(f"[Quality Loop] retry script generation {attempt}/{max_retries}")
             app.run_generator_script(diversify=True)
+            run_script_alignment_check()
 
         for round_no in range(1, max_strategy_rounds + 1):
             print(f"[Quality Loop] refresh strategy context {round_no}/{max_strategy_rounds}")
@@ -31,6 +33,7 @@ def build_quality_wrapper(app, eval_once):
             except Exception as exc:
                 print(f"[Quality Loop] strategy refresh skipped: {exc}")
             app.run_generator_script(diversify=True)
+            run_script_alignment_check()
             for attempt in range(1, max_retries + 2):
                 if eval_once():
                     return True
@@ -38,6 +41,7 @@ def build_quality_wrapper(app, eval_once):
                     break
                 print(f"[Quality Loop] retry after refresh {attempt}/{max_retries}")
                 app.run_generator_script(diversify=True)
+                run_script_alignment_check()
 
         print("[Quality Loop] final status: research_failed_quality")
         try:
@@ -90,6 +94,21 @@ def run_ceo_guidance_preflight():
         return False
 
 
+def run_script_alignment_check():
+    """Check generated script vs CEO topic guidance.
+
+    Warning-only. Does not block publishing.
+    """
+    if os.getenv("ENABLE_SCRIPT_ALIGNMENT_GUARD", "true").lower() != "true":
+        return None
+    try:
+        import script_alignment_guard
+        return script_alignment_guard.check_alignment()
+    except Exception as exc:
+        print(f"[Script Alignment] skipped: {exc}")
+        return None
+
+
 def _interval_seconds():
     return int(os.getenv("PIPELINE_INTERVAL_SECONDS", "10800"))
 
@@ -140,6 +159,7 @@ def main():
     print("[Cycle Wrapper] RUN_ONCE=true; launchd owns the 3 hour schedule")
     print("[Cycle Wrapper] script uniqueness guard enabled")
     print("[Cycle Wrapper] CEO topic guidance preflight enabled")
+    print("[Cycle Wrapper] script alignment guard enabled")
     main_orchestrator.run_orchestration_loop()
     _patch_pipeline_interval(main_orchestrator, "waiting")
 
