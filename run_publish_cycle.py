@@ -70,6 +70,26 @@ def install_unique_generator_wrapper(app):
     app.run_generator_script = unique_run_generator
 
 
+def run_ceo_guidance_preflight():
+    """Generate CEO topic guidance before the publish cycle.
+
+    Best-effort only: if local LLM or CEO dry-run fails, the existing publish
+    flow continues with generator fallback behavior.
+    """
+    if os.getenv("ENABLE_CEO_PREFLIGHT", "true").lower() != "true":
+        print("[CEO Preflight] disabled")
+        return False
+
+    try:
+        import ceo_cycle_draft
+        ceo_cycle_draft.main()
+        print("[CEO Preflight] topic guidance ready")
+        return True
+    except Exception as exc:
+        print(f"[CEO Preflight] skipped: {exc}")
+        return False
+
+
 def _interval_seconds():
     return int(os.getenv("PIPELINE_INTERVAL_SECONDS", "10800"))
 
@@ -104,6 +124,8 @@ def main():
     os.environ["MAX_STRATEGY_REANALYSIS"] = os.getenv("MAX_STRATEGY_REANALYSIS", "1")
     os.environ["RUN_ONCE"] = "true"
 
+    run_ceo_guidance_preflight()
+
     import content_evaluator
     import main_orchestrator
 
@@ -117,6 +139,7 @@ def main():
     print("[Cycle Wrapper] 3 hour publish mode enabled")
     print("[Cycle Wrapper] RUN_ONCE=true; launchd owns the 3 hour schedule")
     print("[Cycle Wrapper] script uniqueness guard enabled")
+    print("[Cycle Wrapper] CEO topic guidance preflight enabled")
     main_orchestrator.run_orchestration_loop()
     _patch_pipeline_interval(main_orchestrator, "waiting")
 
