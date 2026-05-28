@@ -3,6 +3,7 @@ import sys
 import json
 import requests
 import time
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google_sheet_manager import GoogleSheetManager
 from obsidian_publish_sync import sync_publish_report
@@ -56,16 +57,88 @@ def should_retry_publish(error_info):
     return error_info.get("code") in {-1, 1, 2}
 
 
+def _parse_time(value):
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(str(value).strip(), fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def _cooldown_until(payload):
+    explicit_until = _parse_time(payload.get("cooldown_until"))
+    if explicit_until:
+        return explicit_until
+    created_at = _parse_time(payload.get("created_at"))
+    wait_hours = float(payload.get("recommended_wait_hours", 24))
+    if not created_at:
+        return None
+    return created_at + timedelta(hours=wait_hours)
+
+
+def read_publish_cooldown():
+    if not os.path.exists(PUBLISH_COOLDOWN_FILE):
+        return None
+    try:
+        with open(PUBLISH_COOLDOWN_FILE, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        until = _cooldown_until(payload)
+        if not until:
+            return None
+        now = datetime.now()
+        if now < until:
+            return {
+                "active": True,
+                "cooldown_until": until.strftime("%Y-%m-%d %H:%M:%S"),
+                "remaining_seconds": int((until - now).total_seconds()),
+                "payload": payload,
+            }
+        return {"active": False, "cooldown_until": until.strftime("%Y-%m-%d %H:%M:%S"), "payload": payload}
+    except Exception as exc:
+        print(f"[Warning] Instagram cooldown file read failed: {exc}")
+        return None
+
+
 def write_publish_cooldown(error_info):
     os.makedirs("agent_runs", exist_ok=True)
+    created_at = datetime.now()
+    until = created_at + timedelta(hours=24)
     payload = {
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "created_at": created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "cooldown_until": until.strftime("%Y-%m-%d %H:%M:%S"),
         "reason": "instagram_action_blocked",
         "recommended_wait_hours": 24,
         "error": error_info,
     }
     with open(PUBLISH_COOLDOWN_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def maybe_skip_for_cooldown(stage="pre_container"):
+    cooldown = read_publish_cooldown()
+    if not cooldown or not cooldown.get("active"):
+        return False
+
+    report = {
+        "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "ok": False,
+        "skipped": True,
+        "skip_stage": stage,
+        "reason": "instagram_publish_cooldown_active",
+        "cooldown_until": cooldown.get("cooldown_until"),
+        "remaining_seconds": cooldown.get("remaining_seconds"),
+        "published_id": None,
+    }
+    write_upload_report(report)
+    print(
+        "[Instagram] cooldown active -> skip container creation. "
+        f"until={cooldown.get('cooldown_until')}, "
+        f"remaining={cooldown.get('remaining_seconds')}s"
+    )
+    return True
 
 # =====================================================================
 # 1. 캡션 생성 (script.json 연동)
@@ -78,6 +151,7 @@ def get_script_data():
     with open(script_file, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
+
 
 def build_caption(data):
     title = data.get("title", "오늘의 AI 트렌드")
@@ -131,6 +205,7 @@ def get_image_urls(pages_count=None):
         "PUBLIC_BASE_URL 또는 구글 드라이브 임시 업로드 아키텍처를 연동해주십시오."
     )
 
+
 def upload_to_imgur(file_path):
     headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
     url = "https://api.imgur.com/3/image"
@@ -149,15 +224,14 @@ def upload_to_imgur(file_path):
 # 3. Instagram Graph API를 통한 업로드 프로세스
 # =====================================================================
 def wait_for_container_status(container_id):
-    """미디어 컨테이너 상태를 폴링하여 완료될 때까지 대기"""
     check_url = f"https://graph.facebook.com/{API_VERSION}/{container_id}"
     params = {
         "fields": "status_code",
-        "access_token": ACCESS_TOKEN
+        "access_token": ACCESS_TOKEN,
     }
 
     print(f"  - 컨테이너 {container_id} 상태 확인 중...")
-    for _ in range(15):  # 최대 75초 대기
+    for _ in range(15):
         try:
             res = requests.get(check_url, params=params, timeout=10)
             res_data = res.json()
@@ -175,13 +249,16 @@ def wait_for_container_status(container_id):
             time.sleep(5)
     return False
 
+
 def upload_to_instagram(image_urls, caption):
     if not ACCESS_TOKEN or not INSTAGRAM_ACCOUNT_ID:
         raise ValueError("INSTAGRAM_ACCESS_TOKEN 또는 INSTAGRAM_ACCOUNT_ID가 .env에 설정되지 않았습니다.")
 
+    if maybe_skip_for_cooldown(stage="pre_container"):
+        return None
+
     base_url = f"https://graph.facebook.com/{API_VERSION}/{INSTAGRAM_ACCOUNT_ID}"
 
-    # 3-1. 자식 미디어 컨테이너 생성
     child_ids = []
     report = {
         "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -197,7 +274,7 @@ def upload_to_instagram(image_urls, caption):
         params = {
             "image_url": img_url,
             "is_carousel_item": "true",
-            "access_token": ACCESS_TOKEN
+            "access_token": ACCESS_TOKEN,
         }
         res = requests.post(f"{base_url}/media", params=params)
         res_data = res.json()
@@ -215,13 +292,11 @@ def upload_to_instagram(image_urls, caption):
 
         time.sleep(2)
 
-    # 각 자식 컨테이너가 Meta 서버에서 다운로드/FINISHED 상태가 되었는지 검증
     print("\n[Step 1-2] 각 자식 미디어의 Meta 서버 다운로드 상태 검증...")
     for cid in child_ids:
         if not wait_for_container_status(cid):
             print(f"[Warning] 컨테이너 {cid} 상태 확인 타임아웃. 발행 프로세스를 강행합니다.")
 
-    # 3-2. 부모 카러셀 컨테이너 생성
     print("\n[Step 2] 부모 카러셀 컨테이너 생성 중...")
     children_str = ",".join(child_ids)
 
@@ -229,7 +304,7 @@ def upload_to_instagram(image_urls, caption):
         "media_type": "CAROUSEL",
         "children": children_str,
         "caption": caption,
-        "access_token": ACCESS_TOKEN
+        "access_token": ACCESS_TOKEN,
     }
 
     res = requests.post(f"{base_url}/media", params=params)
@@ -245,15 +320,13 @@ def upload_to_instagram(image_urls, caption):
         write_upload_report(report)
         raise RuntimeError(f"부모 카러셀 컨테이너 생성 실패: {res_data}")
 
-    # 부모 컨테이너 상태 검증
     if not wait_for_container_status(parent_container_id):
         print(f"[Warning] 부모 컨테이너 {parent_container_id} 상태 확인 타임아웃. 발행 프로세스를 강행합니다.")
 
-    # 3-3. 부모 컨테이너 최종 발행(Publish)
     print("\n[Step 3] 인스타그램 최종 발행(Publish) 진행 중...")
     publish_params = {
         "creation_id": parent_container_id,
-        "access_token": ACCESS_TOKEN
+        "access_token": ACCESS_TOKEN,
     }
 
     published_id = None
@@ -296,9 +369,12 @@ def upload_to_instagram(image_urls, caption):
 # Main
 # =====================================================================
 def main(override_urls=None, sheet_manager=None):
-    print("="*60)
+    print("=" * 60)
     print(" Instagram Carousel Auto Uploader (Meta Graph API) ")
-    print("="*60)
+    print("=" * 60)
+
+    if maybe_skip_for_cooldown(stage="pre_upload_main"):
+        return None
 
     script_data = get_script_data()
     title = script_data.get("title", "오늘의 AI 트렌드")
@@ -311,7 +387,7 @@ def main(override_urls=None, sheet_manager=None):
 
     if override_urls:
         image_urls = override_urls
-        print(f"[Info] 주입된 구글 드라이브 이미지 호스팅 URL 목록을 사용합니다.")
+        print("[Info] 주입된 구글 드라이브 이미지 호스팅 URL 목록을 사용합니다.")
     else:
         image_urls = get_image_urls(len(script_data.get("pages", [])))
 
@@ -320,7 +396,10 @@ def main(override_urls=None, sheet_manager=None):
     if published_id:
         try:
             print("\n[Step 4] 구글 시트에 업로드 로그 기록 중...")
-            content_summary = "\n".join([f"{p.get('heading', '')} - {p.get('sub_text', '')}".replace("\n", " ") for p in script_data.get("pages", [])])
+            content_summary = "\n".join([
+                f"{p.get('heading', '')} - {p.get('sub_text', '')}".replace("\n", " ")
+                for p in script_data.get("pages", [])
+            ])
             if sheet_manager:
                 sheet_manager.append_upload_row(published_id, title, content_summary)
             else:
@@ -340,6 +419,7 @@ def main(override_urls=None, sheet_manager=None):
                     print(f"  - 임시 파일 삭제 실패 ({img_path}): {ex}")
 
     return published_id
+
 
 if __name__ == "__main__":
     try:
