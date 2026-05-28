@@ -1,0 +1,15 @@
+{
+  "artifact_path": "jobs/test-001/audience_insight.json",
+  "artifact_type": "audience_insight",
+  "passed": true,
+  "schema_check": {
+    "findings": [],
+    "ok": true
+  },
+  "tone_check": {
+    "findings": [],
+    "ok": true,
+    "platform": "instagram"
+  },
+  "warnings": []
+}

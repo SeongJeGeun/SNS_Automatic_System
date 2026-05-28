@@ -1,0 +1,2 @@
+2026-05-28 16:08:46	MIRROR	/var/folders/n8/099np7t9031fmctcpy9b8vb80000gn/T/sns_batch26_jobid_80d6odt9.json	ok=true	action=copied
+2026-05-28 16:08:46	VALIDATION	jobs/test-001/audience_insight.json	ok=true	

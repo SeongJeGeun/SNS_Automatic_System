@@ -1,3 +1,30 @@
+"""Self-Healing Content Generator with Obsidian context flag support.
+
+Batch 32 — obsidian_context_enabled wired from content_strategy.json
+----------------------------------------------------------------------
+``main()`` now reads ``obsidian_context_enabled`` from ``content_strategy.json``
+(written by ``content_strategy.py`` when strategy_mode == "reinforce_theme").
+
+If the flag is True:
+- RAG search query is enriched with theme-continuity keywords.
+- An additional prompt block (``[OBSIDIAN_REINFORCE]``) is injected between
+  the strategy context and the Obsidian RAG section, requesting the model to
+  reinforce theme continuity and cross-reference stored note themes.
+
+If the flag is False or absent:
+- Behaviour is unchanged from the previous version.
+
+All enrichment is **non-blocking**: any exception in the enrichment path
+is swallowed and the generator falls back to its existing prompt construction.
+
+TODO (Batch 33+): Replace ``_build_obsidian_reinforce_block()`` static note
+    injection with direct Obsidian vault retrieval using the previous job's
+    ``script.json`` title as the RAG query, so the model receives actual
+    prior-content excerpts rather than a general continuity directive.
+TODO (Batch 33+): Expose ``obsidian_context_enabled`` status in the
+    ``agent_status.json`` heartbeat for dashboard visibility.
+"""
+
 import os
 import sys
 import json
@@ -9,6 +36,93 @@ from codex_text_bridge import read_json_response, write_story_request
 
 # 환경 변수 로드
 load_dotenv()
+
+
+# ---------------------------------------------------------------------------
+# Batch 32: obsidian_context_enabled helpers (non-blocking)
+# ---------------------------------------------------------------------------
+
+def _load_obsidian_context_flag(strategy_file: str = "content_strategy.json") -> bool:
+    """Read ``obsidian_context_enabled`` from *strategy_file*.
+
+    Returns ``True`` only when the flag is explicitly ``True`` (bool).
+    Missing file, parse error, or any other value → ``False`` (current
+    behaviour preserved).
+
+    Non-blocking: all exceptions are caught and logged.
+
+    TODO (Batch 33+): Accept an explicit job-scoped path so this works
+        correctly when strategy artifacts are stored under ``jobs/[JOB_ID]/``.
+    """
+    try:
+        with open(strategy_file, "r", encoding="utf-8") as f:
+            strategy = json.load(f)
+        flag = strategy.get("obsidian_context_enabled", False)
+        return flag is True
+    except FileNotFoundError:
+        return False
+    except Exception as exc:
+        print(f"[Warning] obsidian_context_enabled 플래그 읽기 실패 (non-blocking): {exc}")
+        return False
+
+
+def _enrich_rag_query(base_query: str) -> str:
+    """Return a theme-continuity-enriched RAG query when reinforce_theme is active.
+
+    Appends continuity-relevant Korean terms so the RAG engine surfaces notes
+    that overlap with the previous content series rather than purely
+    recency-ranked results.
+
+    TODO (Batch 33+): Read the previous ``script.json`` title dynamically
+        instead of appending static terms.
+    """
+    continuity_terms = "시리즈 연속 주제 강화 이전 카드뉴스 연결"
+    return f"{base_query} {continuity_terms}"
+
+
+def _build_obsidian_reinforce_block(obsidian_context: str) -> str:
+    """Build a deterministic prompt block requesting theme continuity.
+
+    The block is inserted *before* the Obsidian RAG section in the main prompt
+    so the model is explicitly primed to treat the RAG excerpts as a
+    theme-continuity anchor rather than a fresh inspiration source.
+
+    Parameters
+    ----------
+    obsidian_context:
+        The RAG-retrieved Obsidian excerpt string (may be empty).
+
+    Returns
+    -------
+    str
+        A formatted prompt block. Returns an empty string if
+        *obsidian_context* is empty, to avoid injecting a useless section.
+
+    TODO (Batch 33+): Include the previous job's ``title`` field from
+        ``script.json`` so the model has an explicit anchor phrase.
+    """
+    if not obsidian_context or not obsidian_context.strip():
+        return ""
+
+    return """
+======================================================
+🔁 [OBSIDIAN_REINFORCE] 테마 연속성 강화 지침 (strategy_mode=reinforce_theme)
+이번 카드뉴스는 이전 시리즈의 핵심 주제를 동일 관점에서 심화하는 연속 편입니다.
+아래 지침을 반드시 준수하세요:
+1. 이전 시리즈에서 사용된 주제 키워드(규율, 몰입, 번아웃, 시스템 등)를 이번 기획에도
+   핵심 어조로 유지하되, 동일 문장을 그대로 반복하지 말고 새로운 각도에서 재해석하세요.
+2. 옵시디언 메모(아래 RAG 결과)를 이전 시리즈의 철학적 맥락 확장에 우선 활용하세요.
+   신선한 인사이트를 추가하되, 브랜드 톤앤매너의 일관성을 최우선으로 유지하세요.
+3. 1장 훅은 이전 시리즈를 이미 본 독자가 '오, 다음 편이구나'라고 느낄 수 있는
+   연속성 있는 표현으로 열되, 처음 보는 독자도 즉시 공감할 수 있는 보편적 고통으로
+   시작해야 합니다.
+======================================================
+"""
+
+
+# ---------------------------------------------------------------------------
+# Original helpers (unchanged from pre-Batch-32)
+# ---------------------------------------------------------------------------
 
 def build_fallback_script(obsidian_context):
     """RAG 맥락을 덧댄 정체성 높은 폴백 script.json 작성 (7장 분량의 고급 매거진 스타일)"""
@@ -130,6 +244,21 @@ def main():
     if top_posts:
         search_query = top_posts[0].get("타이틀", "규율 성장 몰입")
 
+    # ------------------------------------------------------------------
+    # Batch 32: read obsidian_context_enabled flag (non-blocking)
+    # ------------------------------------------------------------------
+    obsidian_context_enabled = _load_obsidian_context_flag()
+
+    if obsidian_context_enabled:
+        # Enrich the RAG query with theme-continuity terms so the retrieval
+        # engine surfaces notes relevant to the prior content series.
+        enriched_query = _enrich_rag_query(search_query)
+        print(
+            f"  - [reinforce_theme] obsidian_context_enabled=True: "
+            f"RAG 쿼리 강화 적용 → '{enriched_query}'"
+        )
+        search_query = enriched_query
+
     rag = ObsidianRAGEngine(vault_path=OBSIDIAN_VAULT_PATH)
     obsidian_context = rag.retrieve_context(search_query, k=3)
 
@@ -137,6 +266,36 @@ def main():
         print("  - 유사도 검색 완료! 매칭된 생각 노트 컨텍스트 확보.")
     else:
         print("  - [Info] 검색 결과가 비어 있거나 로컬 경로 부재로 RAG 컨텍스트를 스킵합니다.")
+
+    # ------------------------------------------------------------------
+    # Batch 32: build reinforce-theme context block (non-blocking)
+    # ------------------------------------------------------------------
+    obsidian_reinforce_block = ""
+    if obsidian_context_enabled:
+        try:
+            obsidian_reinforce_block = _build_obsidian_reinforce_block(obsidian_context)
+            if obsidian_reinforce_block:
+                print("  - [reinforce_theme] 테마 연속성 강화 프롬프트 블록 생성 완료.")
+        except Exception as exc:
+            print(f"[Warning] reinforce 블록 생성 실패 (non-blocking): {exc}")
+            obsidian_reinforce_block = ""
+
+    # ------------------------------------------------------------------
+    # Batch 33: patch job status with obsidian_context_enabled (non-blocking)
+    # ------------------------------------------------------------------
+    try:
+        from agent_status_writer import update_job_status
+        from artifact_mirror import resolve_job_artifact_root
+        _job_root = resolve_job_artifact_root()
+        update_job_status(
+            _job_root.root,
+            {
+                "obsidian_context_enabled": obsidian_context_enabled,
+                "story_agent_stage": "prompt_assembly",
+            },
+        )
+    except Exception as _exc:
+        print(f"[Warning] story agent status 업데이트 실패 (non-blocking): {_exc}")
 
     # 3.5 [NEW] 자가치유 피드백 분석 보고서 로드
     strategy_context = ""
@@ -172,6 +331,8 @@ def main():
     quality_feedback_context = load_optional_json_context("content_quality_feedback.json", "Quality Agent")
 
     # 4. 데이터 + 옵시디언 뇌(RAG) 기반 프롬프트 조립
+    # obsidian_reinforce_block is "" when obsidian_context_enabled is False,
+    # so inserting it is always safe and produces no diff in the default path.
     prompt = f"""너는 인스타그램에서 조회수를 폭발시키는 마인드팩토리의 수석 카피라이터이자 대본 기획자야.
 우리의 핵심 브랜드 마인드셋 철학과 가이드라인은 다음과 같아:
 {philosophy_str}
@@ -179,7 +340,6 @@ def main():
 그리고 1장 표지 작성 시 무조건 반영해야 하는 '표지 어그로 및 비주얼 훅 규칙'은 다음과 같아:
 {hook_rules_str}
 {strategy_context}
-
 이번 카드뉴스를 만들기 전에 반드시 먼저 이해해야 하는 '요즘 사람들이 실제로 힘들어하는 삶의 상태' 분석이야:
 ======================================================
 {audience_context}
@@ -215,7 +375,7 @@ def main():
 ======================================================
 {quality_feedback_context}
 ======================================================
-
+{obsidian_reinforce_block}
 여기에 더해, 우리가 이 대본을 작성할 때 반드시 참고하고 녹여내야 하는 질문자님의 '실제 생각 노트(Obsidian RAG)' 내용들이야:
 ======================================================
 {obsidian_context}

@@ -1,0 +1,3 @@
+2026-05-28 16:16:36	MIRROR	/var/folders/n8/099np7t9031fmctcpy9b8vb80000gn/T/sns_batch29_9ok7h8rh.json	ok=true	action=copied
+2026-05-28 16:16:36	VALIDATION	jobs/batch29-signal/audience_insight.json	ok=true	
+2026-05-28 16:16:36	ANALYSIS	jobs/batch29-signal	ok=true	

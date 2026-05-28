@@ -1,0 +1,37 @@
+{
+  "content_clarity": "clear",
+  "field_completeness": {
+    "missing": [],
+    "ok": true,
+    "present": [
+      "audience_state",
+      "core_pains",
+      "emotional_keywords",
+      "story_angle",
+      "content_principles"
+    ],
+    "ratio": 1.0
+  },
+  "improvement_vs_previous": "stable",
+  "job_root": "jobs/batch27-current",
+  "notes": [],
+  "previous_job_root": "jobs/batch27-prev",
+  "theme_consistency": {
+    "overlap_count": 21,
+    "overlap_terms": [
+      "4:6으로",
+      "공감으로",
+      "누적된다",
+      "동기부여의",
+      "뒤처진다는",
+      "무너지는",
+      "번아웃과",
+      "비교하며",
+      "비난하지",
+      "시작하지",
+      "연결한다",
+      "이야기라고"
+    ],
+    "previous_available": true
+  }
+}

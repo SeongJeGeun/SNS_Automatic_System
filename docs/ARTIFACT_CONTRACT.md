@@ -1,0 +1,60 @@
+# Artifact Contract
+
+## Purpose
+
+Define current artifact ownership and the future job-scoped target without changing runtime behavior.
+
+## Contract Table
+
+| Artifact name | Current location | Producer | Consumer | Purpose | Future job-scoped location | Migration note |
+|---|---|---|---|---|---|---|
+| `manifest.json` | documented only / samples | future orchestrator | dashboard, publisher, monitor | Job identity, state, stage metadata | `jobs/active/[JOB_ID]/manifest.json` | Add later as compatibility metadata; do not require it before current stages work. |
+| `audience_insight.json` | repo root | `audience_research.py` local model path by default; non-local research path as fallback | `content_strategy.py`, story generation | Audience pains, emotional keywords, story angle | `jobs/[JOB_ID]/audience_insight.json` | Root artifact remains authoritative for existing readers; job-scoped mirror is written by hook; `USE_ACTIVE_LATEST=true` preserves `jobs/active/latest` compatibility. |
+| `audit.json` | `jobs/[JOB_ID]/reports/audit.json` | `hooks/validation_hook.py` | downstream strategy/script stages, dashboard/human review | Non-blocking artifact validation report | `jobs/[JOB_ID]/reports/audit.json` | If `JOB_ID` is missing, an auto-generated job id is used and a warning is logged. |
+| `quality_report.json` | `jobs/[JOB_ID]/reports/quality_report.json` | `audience_research.py` | downstream strategy/script stages, dashboard/human review | Non-blocking audience insight readiness metadata | `jobs/[JOB_ID]/reports/quality_report.json` | Downstream readers may inspect it, but it must not block current runtime flow. |
+| `analysis_report.json` | `jobs/[JOB_ID]/reports/analysis_report.json` | `analyze_audience_insight.py` via `audience_research.py` | downstream strategy/script stages, dashboard/human review | Deterministic analysis of audience insight readiness and previous-job comparison | `jobs/[JOB_ID]/reports/analysis_report.json` | Written best-effort after quality report; missing previous job is handled gracefully. |
+| `analysis_summary` | in-process return value from `audience_research.py`; read interface in `analysis_report_reader.py` | `analysis_report_reader.py` | downstream strategy/script stages | Compact advisory metrics from `analysis_report.json` | derived from `jobs/[JOB_ID]/reports/analysis_report.json` | Missing reports return graceful defaults; downstream must not block on this summary. |
+| `strategy_signals` | in-process return value from `audience_research.py`; built by `strategy_signal_builder.py`; **persisted back to `audience_insight.json`** by `_persist_strategy_signals()` (Batch 31) | `strategy_signal_builder.py` | downstream strategy/script stages | Advisory mode and flags derived from `analysis_summary` | in-memory + persisted to `audience_insight.json` | Non-blocking; missing analysis yields conservative defaults. |
+| `audit_log.txt` | `jobs/[JOB_ID]/reports/audit_log.txt` | hooks / `hooks/audit_logger.py` | monitoring, dashboard/human review | Hook events and non-blocking warnings | `jobs/[JOB_ID]/reports/audit_log.txt` | `USE_ACTIVE_LATEST=true` writes to `jobs/active/latest/reports/audit_log.txt` for compatibility. |
+| `content_strategy.json` | repo root | `content_strategy.py`, performance learning | `self_healing_generator.py`, `content_evaluator.py` | Strategy, quality bar, story structure | `jobs/active/[JOB_ID]/strategy.json` | Future name should be `strategy.json`; keep root `content_strategy.json` mirror during transition. |
+| `jobs/[JOB_ID]/reports/agent_status.json` | `jobs/[JOB_ID]/reports/agent_status.json` | `agent_status_writer.py` via `audience_research.py` and `self_healing_generator.py` | dashboard/human review, monitoring | Lightweight per-job runtime state: model, quality, strategy mode, obsidian flag, generation time | `jobs/[JOB_ID]/reports/agent_status.json` | Written best-effort non-blocking; does NOT touch `agent_runs/agent_status.json` (global pipeline state). |
+| `codex_strategy_brief.md` | repo root | `content_strategy.py` | model bridge / human review | Human-readable strategy brief | `jobs/active/[JOB_ID]/briefs/strategy.md` | Optional diagnostic artifact; not a hard runtime contract. |
+| `self_healing_strategy.json` | repo root | recovery / performance pre-check | `self_healing_generator.py` | Recovery prompt injection for next story | `jobs/active/[JOB_ID]/recovery/self_healing_strategy.json` | Keep separate from normal strategy to avoid hidden mutation. |
+| `script.json` | repo root | `self_healing_generator.py` | `content_evaluator.py`, `card_renderer.py`, `upload_carousel.py` | Main story/page contract | `jobs/active/[JOB_ID]/script.json` | Highest-priority migration target; root mirror required until all consumers accept job path. |
+| `content_quality_report.json` | repo root | `content_evaluator.py` | orchestrator, dashboard/human review | Quality score and pass/fail | `jobs/active/[JOB_ID]/quality_report_1.json` | If retry occurs, preserve first report and write second report separately. |
+| `content_quality_feedback.json` | repo root | `content_evaluator.py` | `self_healing_generator.py` | Retry feedback for failed quality gate | `jobs/active/[JOB_ID]/quality_feedback.json` | Treat as retry input, not final report. |
+| `quality_report_2.json` | documented only / samples | future quality retry | orchestrator, monitor | Second quality attempt result | `jobs/active/[JOB_ID]/quality_report_2.json` | Add when retry artifacts become job-scoped. |
+| `visual_plan.json` | documented only / samples | future renderer / visual planner | renderer, publisher, dashboard | Planned card visuals and asset metadata | `jobs/active/[JOB_ID]/visual_plan.json` | Current visual plan is implicit in `script.json` page fields. |
+| `codex_image_requests.md` | repo root | `image_generator.py` | model bridge / human review | External image generation request brief | `jobs/active/[JOB_ID]/briefs/image_requests.md` | Optional bridge artifact; keep root mirror while external tooling expects it. |
+| `generated_backgrounds/*/page*_bg.png` | `generated_backgrounds/` | `image_generator.py` | `card_renderer.py` | Generated or fallback backgrounds | `jobs/active/[JOB_ID]/assets/backgrounds/page*_bg.png` | Can migrate after renderer accepts explicit output dir. |
+| `page*.png` | repo root | `card_renderer.py` | orchestrator temporary hosting, `upload_carousel.py` fallback | Final rendered carousel cards | `jobs/active/[JOB_ID]/cards/page*.png` | Must preserve root mirror until publisher no longer infers global filenames. |
+| `caption.json` | documented only / samples | future upload planner | publisher, dashboard | Publish caption contract | `jobs/active/[JOB_ID]/caption.json` | Current caption is built inside `upload_carousel.py`; extract only after path contract is stable. |
+| `publish_plan.json` | documented only / samples | future upload planner / orchestrator | publisher | Schedule, image URLs, publish options | `jobs/active/[JOB_ID]/publish_plan.json` | Current publish inputs are runtime variables and Drive URLs. |
+| `final_status.json` | documented only / samples | publisher / orchestrator | monitor, dashboard, archive | Final job result | `jobs/active/[JOB_ID]/final_status.json` | Current final state is split across `agent_runs` and upload reports. |
+| `instagram_last_upload_report.json` | `agent_runs/` | `upload_carousel.py` | Obsidian sync, dashboard/human review | Instagram publish attempt result | `jobs/active/[JOB_ID]/reports/instagram_last_upload_report.json` | Keep `agent_runs` copy for latest-run dashboard compatibility. |
+| `instagram_publish_cooldown.json` | `agent_runs/` | `upload_carousel.py` | orchestrator/recovery, human operator | Action-block cooldown state | `agent_runs/instagram_publish_cooldown.json` plus optional job copy | This is global account state; do not make it job-only. |
+| `agent_status.json` | `agent_runs/` | `agent_monitor.py`, orchestrator | dashboard, Telegram, human operator | Current pipeline and agent status | `agent_runs/agent_status.json` | Global runtime state; should reference current job id when job folders exist. |
+| `agent_events.jsonl` | `agent_runs/` | `agent_monitor.py` | dashboard, human operator | Event log / heartbeat history | `agent_runs/agent_events.jsonl` | Global append-only monitor log; optional per-job event slice later. |
+| `codex_command_queue.jsonl` | `agent_runs/` | Telegram/dashboard command bridge | external Codex operator / dashboard | Queued human commands | `agent_runs/codex_command_queue.jsonl` | Global control queue, not job-scoped. |
+| `codex_*_response.json` | repo root | model bridge | generation/recovery stages | External JSON response payloads | `jobs/active/[JOB_ID]/bridge/*.json` | Keep root mirrors until bridge tooling accepts job context. |
+| `daily_report.json` | repo root / runtime | reporting flow | human/dashboard | Daily summary | `jobs/active/[JOB_ID]/reports/daily_report.json` or `agent_runs/reports/` | Unclear current ownership; verify before migration. |
+
+## Contract Rules
+
+- Job-scoped artifacts are the target for content-specific outputs.
+- `JOB_ID` is read from the environment; if absent, runtime creates a timestamp-based id and logs a warning.
+- `USE_ACTIVE_LATEST=true` forces compatibility paths under `jobs/active/latest`.
+- `agent_runs/` remains the target for global runtime state.
+- Root artifacts remain compatibility mirrors during migration.
+- Publishing inputs must become explicit before root `page*.png` can be retired.
+- `audience_insight.json` has a lightweight non-blocking quality gate for essential field readiness; it logs warnings only and does not trigger fallback.
+- `jobs/active/latest/reports/quality_report.json` records the current audience insight readiness result for optional downstream inspection.
+- `jobs/[JOB_ID]/reports/analysis_report.json` records deterministic analysis and previous-job comparison; it is advisory only.
+- Downstream stages can call `read_analysis_summary(job_id)` to read `content_clarity`, `improvement_vs_previous`, and theme overlap without blocking.
+- Downstream stages can inspect `strategy_signals` for advisory `strategy_mode`, clarity, consistency, and improvement flags.
+- (Batch 30) Downstream strategy/script modules may call `adapt_strategy_from_signals(insight.get("strategy_signals"))` from `example_strategy_consumer.py` to receive an adapted strategy config. This is advisory and non-blocking; it must never change publish behavior or block execution.
+- (Batch 30) `example_strategy_consumer.py` is the reference consumer for `strategy_signals`. It returns conservative defaults when signals are unavailable.
+- (Batch 31) `strategy_signals` is persisted back into `audience_insight.json` by `_persist_strategy_signals()` so file-based readers (e.g., `content_strategy.py`) can access signals without requiring in-process chaining.
+- (Batch 31) `content_strategy.py` calls `adapt_strategy_from_signals()` and applies adaptation to `quality_bar`, `story_structure`, `hook_rules`, and `obsidian_context_enabled`. The adapted config is stored in `adapted_strategy_config` for auditability. All adaptation is non-blocking.
+- (Batch 32) `self_healing_generator.py` reads `obsidian_context_enabled` from `content_strategy.json` via `_load_obsidian_context_flag()`. When `True`, the Obsidian RAG query is enriched with theme-continuity terms and an `[OBSIDIAN_REINFORCE]` prompt block is injected before the RAG section. Flag missing or `False` → current behaviour unchanged. Non-blocking throughout.
+- (Batch 33) `agent_status_writer.py` provides `write_job_status()`, `update_job_status()`, and `read_job_status()` helpers. `audience_research.py` writes initial job status after insight generation; `self_healing_generator.py` patches `obsidian_context_enabled` and `story_agent_stage`. Output: `jobs/[JOB_ID]/reports/agent_status.json`. Non-blocking; never touches `agent_runs/agent_status.json`.

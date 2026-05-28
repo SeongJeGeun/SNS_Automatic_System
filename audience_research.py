@@ -1,6 +1,32 @@
+"""Audience research module: generates audience insight and attaches advisory signals.
+
+Downstream consumer note (Batch 30)
+-------------------------------------
+After ``create_audience_insight()`` returns, the returned dict contains
+``strategy_signals`` — an advisory-only dict built by
+``strategy_signal_builder.build_strategy_signals()``.  Downstream strategy
+or script modules may **optionally** read these signals and adapt their
+behavior without changing publish or blocking behavior.
+
+Example (read-only, non-blocking)::
+
+    from example_strategy_consumer import adapt_strategy_from_signals
+
+    insight = create_audience_insight()
+    adapted_config = adapt_strategy_from_signals(insight.get("strategy_signals"))
+    # adapted_config is advisory only — never passed to upload_carousel,
+    # scheduler, or Telegram modules.
+
+If ``strategy_signals`` is absent or ``available=False``, the consumer
+returns conservative defaults automatically.
+
+TODO (Batch 31+): Wire ``adapt_strategy_from_signals`` into the real
+    strategy/script generation stage once prompt-rule ownership is approved.
+"""
 import json
 import os
 import re
+import time
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -62,6 +88,10 @@ DEFAULT_AUDIENCE_INSIGHT = {
         "위로와 동기부여의 비율은 4:6으로 둔다.",
     ],
 }
+
+DEFAULT_LOCAL_AUDIENCE_MODEL = "gemma4:26b"
+DEFAULT_LOCAL_AUDIENCE_TIMEOUT_SECONDS = "30"
+LOCAL_AUDIENCE_SUCCESS_STATUS = "local_obsidian_ollama_json_parsed"
 
 
 def read_recent_local_trends(vault_path="obsidian_vault", limit=4):
@@ -263,7 +293,321 @@ def read_text(path):
         return ""
 
 
-def create_audience_insight(output_file="audience_insight.json"):
+def _truthy(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_audience_artifact_paths():
+    """Resolve audience artifact paths for the current job.
+
+    TODO: Replace env resolution with scheduler/job manager context.
+    """
+    from artifact_mirror import resolve_job_artifact_root
+
+    job_root = resolve_job_artifact_root()
+    return {
+        "job_id": job_root.job_id,
+        "job_root": job_root.root,
+        "warning": job_root.warning,
+        "audience_insight": f"{job_root.root}/audience_insight.json",
+        "audit_report": f"{job_root.root}/reports/audit.json",
+        "quality_report": f"{job_root.root}/reports/quality_report.json",
+        "analysis_report": f"{job_root.root}/reports/analysis_report.json",
+        "audit_log": f"{job_root.root}/reports/audit_log.txt",
+    }
+
+
+def _log_job_path_warning(paths):
+    warning = paths.get("warning")
+    if not warning:
+        return
+    try:
+        from hooks.audit_logger import log_hook_event
+        log_hook_event(
+            "JOB_ID",
+            paths.get("job_root", "unknown"),
+            {"ok": False, "warnings": [warning]},
+            log_path=paths["audit_log"],
+        )
+    except Exception:
+        pass
+
+
+def _run_audience_post_write_hooks(output_file, paths):
+    try:
+        from hooks.mirror_hook import mirror_audience_insight
+        mirror_audience_insight(
+            output_file,
+            target_path=paths["audience_insight"],
+            audit_log_path=paths["audit_log"],
+        )
+    except Exception:
+        pass
+
+    try:
+        from hooks.validation_hook import write_audience_insight_validation_report
+        write_audience_insight_validation_report(
+            artifact_path=paths["audience_insight"],
+            report_path=paths["audit_report"],
+            audit_log_path=paths["audit_log"],
+        )
+    except Exception:
+        pass
+
+
+def _run_audience_quality_gate(insight, output_file, paths):
+    """Log minimal audience insight readiness warnings without blocking.
+
+    TODO: Promote this to a richer quality report after strategy/script
+    consumers define their readiness requirements.
+    """
+    try:
+        from schema_validator import validate_audience_insight_quality
+        result = validate_audience_insight_quality(insight)
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "warnings": [f"quality gate unavailable: {exc}"],
+        }
+
+    if result.get("ok"):
+        return result
+
+    try:
+        from hooks.audit_logger import log_hook_event
+        log_hook_event(
+            "AUDIENCE_QUALITY",
+            output_file,
+            result,
+            details="non-blocking quality gate warning",
+            log_path=paths["audit_log"],
+        )
+    except Exception:
+        pass
+
+    return result
+
+
+def _write_audience_quality_report(
+    insight,
+    quality_result,
+    generation_time_seconds,
+    report_path,
+):
+    """Write a small readiness report for downstream stages.
+
+    TODO: Surface this report in monitoring/dashboard views after ownership is
+    defined.
+    """
+    try:
+        compatibility = insight.get("compatibility") or {}
+        report = {
+            "quality_ok": bool(quality_result.get("ok")),
+            "warnings": quality_result.get("warnings") or [],
+            "generation_time_seconds": round(float(generation_time_seconds), 2),
+            "model": insight.get("model"),
+            "status": insight.get("status"),
+            "json_parse_ok": compatibility.get("json_parse_ok"),
+            "schema_ok": insight.get("schema_check", {}).get("ok"),
+            "model_backed_fields": compatibility.get("model_backed_fields") or [],
+        }
+        os.makedirs(os.path.dirname(report_path), exist_ok=True)
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _run_audience_analysis(paths):
+    """Write non-blocking analysis metadata for long-running operation."""
+    try:
+        from analyze_audience_insight import write_analysis_report
+        report = write_analysis_report(
+            paths["job_root"],
+            report_path=paths["analysis_report"],
+        )
+    except Exception as exc:
+        report = {"ok": False, "warnings": [f"analysis unavailable: {exc}"]}
+
+    try:
+        from hooks.audit_logger import log_hook_event
+        log_hook_event(
+            "ANALYSIS",
+            paths["job_root"],
+            {"ok": bool(report), "warnings": report.get("notes", [])},
+            log_path=paths["audit_log"],
+        )
+    except Exception:
+        pass
+
+
+def _attach_analysis_summary(insight, paths):
+    """Attach advisory analysis metrics for downstream in-process consumers."""
+    try:
+        from analysis_report_reader import read_analysis_summary
+        insight["analysis_summary"] = read_analysis_summary(paths["job_id"])
+    except Exception:
+        insight["analysis_summary"] = {
+            "available": False,
+            "job_id": paths.get("job_id"),
+            "content_clarity": "unknown",
+            "improvement_vs_previous": "unknown",
+            "theme_consistency": {
+                "overlap_count": 0,
+                "previous_available": False,
+            },
+            "warnings": ["analysis summary unavailable"],
+        }
+
+
+def _attach_strategy_signals(insight):
+    """Attach non-blocking strategy adaptation signals for downstream use.
+
+    The attached ``strategy_signals`` dict is advisory only.  Downstream
+    strategy/script modules may read it via
+    ``example_strategy_consumer.adapt_strategy_from_signals()`` to optionally
+    adapt prompt parameters.  This must never block execution or change
+    publish behavior.
+
+    TODO (Batch 32+): Replace ``example_strategy_consumer`` import with the
+    production strategy consumer once downstream ownership is confirmed.
+    """
+    try:
+        from strategy_signal_builder import build_strategy_signals
+        insight["strategy_signals"] = build_strategy_signals(
+            insight.get("analysis_summary")
+        )
+    except Exception:
+        insight["strategy_signals"] = {
+            "available": False,
+            "strategy_mode": "conservative",
+            "clarity_flag": "needs_review",
+            "consistency_flag": "unknown",
+            "improvement_flag": "unknown",
+            "source": "fallback",
+        }
+
+
+def _write_job_status_from_insight(insight, artifact_paths, quality_result, generation_time_seconds):
+    """Write a lightweight job-scoped status artifact after insight generation.
+
+    Non-blocking wrapper around ``agent_status_writer.write_job_status()``.
+    All exceptions are swallowed so the caller's flow is never interrupted.
+
+    TODO (Batch 34+): Stream status to a dashboard WebSocket endpoint once
+        the dashboard owns the status subscription contract.
+    """
+    try:
+        from agent_status_writer import write_job_status
+        signals = insight.get("strategy_signals") or {}
+        analysis_summary = insight.get("analysis_summary") or {}
+        write_job_status(
+            job_id=artifact_paths.get("job_id", "unknown"),
+            job_root=artifact_paths.get("job_root", "jobs/unknown"),
+            model=insight.get("model"),
+            generation_status=insight.get("status"),
+            quality_ok=bool(quality_result.get("ok")),
+            quality_warnings=quality_result.get("warnings") or [],
+            analysis_available=bool(analysis_summary.get("available")),
+            strategy_mode=signals.get("strategy_mode"),
+            obsidian_context_enabled=None,  # set later by self_healing_generator
+            generation_time_seconds=generation_time_seconds,
+            extra={
+                "clarity_flag": signals.get("clarity_flag"),
+                "consistency_flag": signals.get("consistency_flag"),
+                "improvement_flag": signals.get("improvement_flag"),
+                "signal_source": signals.get("source"),
+            },
+        )
+    except Exception as exc:
+        print(f"[Warning] job status 기록 실패 (non-blocking): {exc}")
+
+
+def _persist_strategy_signals(insight, output_file):
+    """Re-write *output_file* so ``strategy_signals`` is available to file readers.
+
+    ``content_strategy.py`` reads ``audience_insight.json`` from disk, so
+    signals must be persisted after ``_attach_strategy_signals()`` writes them
+    into the in-memory dict.  This write is best-effort and non-blocking.
+
+    TODO (Batch 32+): Replace with a structured patch-write once job-scoped
+    artifact paths are stable.
+    """
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(insight, f, ensure_ascii=False, indent=2)
+        print(
+            f"[Audience Agent] strategy_signals audience_insight.json에 반영 완료: "
+            f"mode={insight.get('strategy_signals', {}).get('strategy_mode')}"
+        )
+    except Exception as exc:
+        print(f"[Warning] strategy_signals 파일 반영 실패 (non-blocking): {exc}")
+
+
+def _create_local_audience_insight(output_file):
+    """Default local draft path with non-local fallback handled by caller.
+
+    TODO: Add deeper quality scoring before accepting model-backed JSON.
+    """
+    from generate_audience_insight_local import generate_local_draft, write_draft
+
+    draft = generate_local_draft(
+        model_name=os.getenv("LOCAL_AUDIENCE_INSIGHT_MODEL", DEFAULT_LOCAL_AUDIENCE_MODEL),
+        endpoint=os.getenv("LOCAL_AUDIENCE_INSIGHT_ENDPOINT", "http://localhost:11434"),
+        vault_path=os.getenv("LOCAL_AUDIENCE_INSIGHT_VAULT_PATH") or None,
+        ollama_timeout_seconds=(
+            os.getenv("OLLAMA_TIMEOUT_SECONDS")
+            or DEFAULT_LOCAL_AUDIENCE_TIMEOUT_SECONDS
+        ),
+    )
+    schema_ok = draft.get("schema_check", {}).get("ok")
+    if draft.get("status") != LOCAL_AUDIENCE_SUCCESS_STATUS or not schema_ok:
+        raise RuntimeError(
+            f"local audience insight unavailable: status={draft.get('status')}, "
+            f"schema_ok={schema_ok}"
+        )
+    write_draft(output_file, draft)
+    return draft
+
+
+def create_audience_insight(output_file="audience_insight.json", use_local_draft=True):
+    artifact_paths = _resolve_audience_artifact_paths()
+    _log_job_path_warning(artifact_paths)
+    local_draft_enabled = use_local_draft or _truthy(
+        os.getenv("LOCAL_AUDIENCE_INSIGHT_DRAFT_ENABLED")
+    )
+    if local_draft_enabled:
+        try:
+            generation_started = time.perf_counter()
+            insight = _create_local_audience_insight(output_file)
+            generation_time_seconds = time.perf_counter() - generation_started
+            _run_audience_post_write_hooks(output_file, artifact_paths)
+            quality_result = _run_audience_quality_gate(
+                insight,
+                output_file,
+                artifact_paths,
+            )
+            _write_audience_quality_report(
+                insight,
+                quality_result,
+                generation_time_seconds,
+                artifact_paths["quality_report"],
+            )
+            _run_audience_analysis(artifact_paths)
+            _attach_analysis_summary(insight, artifact_paths)
+            _attach_strategy_signals(insight)
+            _persist_strategy_signals(insight, output_file)
+            _write_job_status_from_insight(
+                insight, artifact_paths, quality_result, generation_time_seconds
+            )
+            build_codex_research_brief(insight)
+            print(f"[Audience Agent] local audience insight draft 생성 완료: {output_file}")
+            print("[Audience Agent] Codex 조사 지시서 생성 완료: codex_research_brief.md")
+            return insight
+        except Exception as exc:
+            print(f"[Warning] 로컬 audience insight draft 실패, 기존 경로로 폴백합니다: {exc}")
+
+    generation_started = time.perf_counter()
     local_trends = read_recent_local_trends()
     search_results = run_antigravity_pain_signal_search()
     parsed_search = parse_search_results(search_results)
@@ -286,6 +630,23 @@ def create_audience_insight(output_file="audience_insight.json"):
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(insight, f, ensure_ascii=False, indent=2)
+    generation_time_seconds = time.perf_counter() - generation_started
+
+    _run_audience_post_write_hooks(output_file, artifact_paths)
+    quality_result = _run_audience_quality_gate(insight, output_file, artifact_paths)
+    _write_audience_quality_report(
+        insight,
+        quality_result,
+        generation_time_seconds,
+        artifact_paths["quality_report"],
+    )
+    _run_audience_analysis(artifact_paths)
+    _attach_analysis_summary(insight, artifact_paths)
+    _attach_strategy_signals(insight)
+    _persist_strategy_signals(insight, output_file)
+    _write_job_status_from_insight(
+        insight, artifact_paths, quality_result, generation_time_seconds
+    )
 
     build_codex_research_brief(insight)
     print(f"[Audience Agent] audience insight 생성 완료: {output_file}")

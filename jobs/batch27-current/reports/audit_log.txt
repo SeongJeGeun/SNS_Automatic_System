@@ -1,0 +1,3 @@
+2026-05-28 16:12:16	MIRROR	/var/folders/n8/099np7t9031fmctcpy9b8vb80000gn/T/sns_batch27_current_3gseuea_.json	ok=true	action=copied
+2026-05-28 16:12:16	VALIDATION	jobs/batch27-current/audience_insight.json	ok=true	
+2026-05-28 16:12:16	ANALYSIS	jobs/batch27-current	ok=true	

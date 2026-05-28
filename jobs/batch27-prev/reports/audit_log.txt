@@ -1,0 +1,3 @@
+2026-05-28 16:12:07	MIRROR	/var/folders/n8/099np7t9031fmctcpy9b8vb80000gn/T/sns_batch27_prev_dfm1d_z2.json	ok=true	action=copied
+2026-05-28 16:12:07	VALIDATION	jobs/batch27-prev/audience_insight.json	ok=true	
+2026-05-28 16:12:07	ANALYSIS	jobs/batch27-prev	ok=true	

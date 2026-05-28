@@ -1,0 +1,3 @@
+2026-05-28 16:08:55	JOB_ID	jobs/job-20260528-160855	ok=false	warnings=JOB_ID not set; auto-generated job id
+2026-05-28 16:08:55	MIRROR	/var/folders/n8/099np7t9031fmctcpy9b8vb80000gn/T/sns_batch26_auto_x_3dq96a.json	ok=true	action=copied
+2026-05-28 16:08:55	VALIDATION	jobs/job-20260528-160855/audience_insight.json	ok=true	

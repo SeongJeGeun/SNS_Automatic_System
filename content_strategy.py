@@ -1,5 +1,27 @@
+"""Content strategy module: builds content_strategy.json from audience insight.
+
+Batch 31 — Signal Adaptation Integration
+-----------------------------------------
+``create_content_strategy()`` now reads ``strategy_signals`` from the audience
+insight artifact and optionally adapts:
+
+- ``quality_bar.minimum_score``  (conservative → lower threshold)
+- ``story_structure``            (conservative → shortened; reinforce_theme → theme lock)
+- ``hook_rules``                 (clarity=needs_review → specificity directive added)
+- ``obsidian_context_enabled``   (reinforce_theme → True, others → False)
+
+All adaptation is **non-blocking**: if signals are absent or the consumer
+raises any exception, the strategy falls back to conservative defaults without
+affecting publish behavior.
+
+TODO (Batch 32+): Surface ``adapted_strategy_config`` in monitoring/dashboard
+    views after QA ownership is defined.
+"""
+
 import json
 from datetime import datetime
+
+from example_strategy_consumer import adapt_strategy_from_signals
 
 
 DEFAULT_STRATEGY = {
@@ -41,6 +63,119 @@ def load_json(path):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Signal adaptation helpers (non-blocking)
+# ---------------------------------------------------------------------------
+
+def _apply_signal_adaptation(strategy: dict, adapted_config: dict) -> None:
+    """Mutate *strategy* in-place based on *adapted_config* from the consumer.
+
+    Rules applied here mirror the adaptation rules documented in
+    ``example_strategy_consumer``:
+
+    - conservative  → lower quality bar score, shorten story_structure,
+                       add specificity directive to hook_rules
+    - reinforce_theme → lock story theme, enable obsidian_context flag,
+                         add theme-repetition note to hook_rules
+    - clarity=needs_review → add prompt-specificity directive to hook_rules
+                              (applies to any strategy_mode)
+
+    All changes are advisory; they append or adjust fields already present
+    in *strategy* without removing existing rules.
+    """
+    mode = adapted_config.get("strategy_mode", "conservative")
+    specificity = adapted_config.get("prompt_specificity", "normal")
+    theme_repetition = adapted_config.get("theme_repetition", False)
+    obsidian = adapted_config.get("obsidian_context", False)
+    rationale = adapted_config.get("rationale", "")
+
+    # Store the full adapted config for downstream inspection / audit.
+    strategy["adapted_strategy_config"] = adapted_config
+
+    # -- conservative: tighten quality bar, shorten story arc ---------------
+    if mode == "conservative":
+        # Lower the minimum score so a conservative-mode output is not unfairly
+        # penalised for shorter length.
+        qb = strategy.setdefault("quality_bar", {})
+        qb["minimum_score"] = min(qb.get("minimum_score", 72), 65)
+        qb["signal_note"] = (
+            "conservative mode: minimum_score relaxed to 65 to allow "
+            "shorter, safer output"
+        )
+
+        # Compress story structure to 5 cards (already the minimum).
+        strategy["story_structure"] = merge_unique(
+            strategy.get("story_structure", []),
+            ["[conservative] 총 장수를 5장 이내로 압축하고 핵심 공감-행동 흐름만 유지한다."],
+        )
+
+    # -- reinforce_theme: lock theme, enable obsidian ------------------------
+    if mode == "reinforce_theme":
+        strategy["obsidian_context_enabled"] = True
+        strategy["story_structure"] = merge_unique(
+            strategy.get("story_structure", []),
+            [
+                "[reinforce_theme] 이전 카드뉴스의 핵심 주제를 반복 강화한다. "
+                "동일 주제를 새로운 각도에서 재해석해 일관성을 유지한다.",
+            ],
+        )
+        strategy["hook_rules"] = merge_unique(
+            strategy.get("hook_rules", []),
+            [
+                "[reinforce_theme] 이전 시리즈와 연속성이 느껴지는 훅 표현을 "
+                "우선 사용한다.",
+            ],
+        )
+
+    # -- clarity=needs_review: elevate prompt specificity -------------------
+    if specificity == "high":
+        strategy["hook_rules"] = merge_unique(
+            strategy.get("hook_rules", []),
+            [
+                "[clarity:needs_review] 독자의 구체적인 상황(시간·장소·행동)을 "
+                "훅 첫 문장에 명시하여 모호함을 제거한다.",
+            ],
+        )
+        strategy.setdefault("quality_bar", {})["prompt_specificity"] = "high"
+
+    # -- obsidian flag (shared by reinforce_theme and any future modes) ------
+    if obsidian:
+        strategy["obsidian_context_enabled"] = True
+
+    # Always store the rationale for auditability.
+    strategy["signal_adaptation_rationale"] = rationale
+
+
+def _attach_signal_adaptation(strategy: dict, audience: dict) -> None:
+    """Non-blocking wrapper: read signals from audience and adapt strategy.
+
+    TODO (Batch 32+): Replace direct dict access with a typed interface once
+        ``audience_insight`` schema is stabilised.
+    """
+    try:
+        signals = audience.get("strategy_signals")
+        adapted_config = adapt_strategy_from_signals(signals)
+        _apply_signal_adaptation(strategy, adapted_config)
+        print(
+            f"[Strategy Agent] 시그널 어댑테이션 적용 완료: "
+            f"mode={adapted_config.get('strategy_mode')}, "
+            f"specificity={adapted_config.get('prompt_specificity')}, "
+            f"obsidian={adapted_config.get('obsidian_context')}"
+        )
+    except Exception as exc:
+        # Non-blocking: log and continue without modifying strategy further.
+        print(f"[Warning] 시그널 어댑테이션 실패 (non-blocking): {exc}")
+        strategy["adapted_strategy_config"] = {
+            "strategy_mode": "conservative",
+            "source": "error_fallback",
+            "rationale": f"adaptation error: {exc}",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def create_content_strategy(
     audience_file="audience_insight.json",
     output_file="content_strategy.json",
@@ -74,19 +209,23 @@ def create_content_strategy(
 
     merge_performance_learning(strategy, previous_strategy)
 
+    # ------------------------------------------------------------------
+    # Batch 31: apply strategy_signals adaptation (non-blocking)
+    # ------------------------------------------------------------------
+    _attach_signal_adaptation(strategy, audience)
+
     strategy["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    strategy["quality_bar"] = {
-        "minimum_score": 72,
-        "must_have": [
-            "첫 장에 구체적인 고통이 있어야 한다.",
-            "3장 안에 문제 원인 해석이 나와야 한다.",
-            "마지막 장에 저장할 이유가 있어야 한다.",
-            "각 장은 하나의 생각만 담아야 한다.",
-            "image_prompt는 각 장 의미와 달라야 한다.",
-            "중간 장(3~4장)에 이타주의 자극을 위한 즉시 적용 가능한 3단계 실천 팁 요약이 포함되어야 한다.",
-            "마지막 장에 라이트 유저의 성취/지위 증명을 돕는 인증 또는 챌린지 템플릿(문구)이 명확히 포함되어야 한다."
-        ],
-    }
+    strategy["quality_bar"] = strategy.get("quality_bar") or {}
+    strategy["quality_bar"].setdefault("minimum_score", 72)
+    strategy["quality_bar"].setdefault("must_have", [
+        "첫 장에 구체적인 고통이 있어야 한다.",
+        "3장 안에 문제 원인 해석이 나와야 한다.",
+        "마지막 장에 저장할 이유가 있어야 한다.",
+        "각 장은 하나의 생각만 담아야 한다.",
+        "image_prompt는 각 장 의미와 달라야 한다.",
+        "중간 장(3~4장)에 이타주의 자극을 위한 즉시 적용 가능한 3단계 실천 팁 요약이 포함되어야 한다.",
+        "마지막 장에 라이트 유저의 성취/지위 증명을 돕는 인증 또는 챌린지 템플릿(문구)이 명확히 포함되어야 한다."
+    ])
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(strategy, f, ensure_ascii=False, indent=2)
