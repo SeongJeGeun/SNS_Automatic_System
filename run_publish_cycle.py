@@ -1,5 +1,6 @@
 import os
 
+
 def build_quality_wrapper(app, eval_once):
     max_retries = int(os.getenv("MAX_QUALITY_RETRIES", "5"))
     max_strategy_rounds = int(os.getenv("MAX_STRATEGY_REANALYSIS", "1"))
@@ -55,6 +56,7 @@ def build_quality_wrapper(app, eval_once):
 
     return wrapped_eval
 
+
 def main():
     os.environ["PIPELINE_INTERVAL_SECONDS"] = os.getenv("PIPELINE_INTERVAL_SECONDS", "10800")
     os.environ["RUN_MODE"] = "publish"
@@ -65,6 +67,7 @@ def main():
     os.environ["SKIP_THREADS_IMAGE_PUBLISH"] = "false"
     os.environ["MAX_QUALITY_RETRIES"] = os.getenv("MAX_QUALITY_RETRIES", "5")
     os.environ["MAX_STRATEGY_REANALYSIS"] = os.getenv("MAX_STRATEGY_REANALYSIS", "1")
+    os.environ["RUN_ONCE"] = "true"
 
     import content_evaluator
     import main_orchestrator
@@ -77,7 +80,9 @@ def main():
     print("[Cycle Wrapper] 3시간 업로드 모드 실행")
     print("[Cycle Wrapper] 품질 재시도 + 트렌드/전략 재분석 fallback 활성화")
     print("[Cycle Wrapper] RUN_MODE=publish, Instagram publish enabled, Threads text-only enabled")
-    main_orchestrator.main()
+    print("[Cycle Wrapper] RUN_ONCE=true → launchd가 3시간 주기를 담당하고 Python은 1회 실행 후 종료")
+    main_orchestrator.run_orchestration_loop()
+
 
 if __name__ == "__main__":
     main()
