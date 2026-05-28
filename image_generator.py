@@ -10,6 +10,10 @@ from antigravity_bridge import run_image_task
 load_dotenv()
 
 
+REQUEST_LABEL = "Codex/Research Request"
+IMAGE_REQUEST_FILE = "codex_image_requests.md"
+
+
 def build_background_prompt(page, title):
     image_prompt = page.get("image_prompt", "").strip()
     heading = page.get("heading", "").strip()
@@ -35,11 +39,11 @@ Requirements:
 """.strip()
 
 
-def write_codex_image_brief(prompts, output_file="codex_image_requests.md"):
+def write_codex_image_brief(prompts, output_file=IMAGE_REQUEST_FILE):
     lines = [
-        "# Antigravity Image Requests",
+        "# Codex Image Requests",
         "",
-        "아래 프롬프트는 Antigravity CLI 이미지 생성으로 처리할 장별 요청입니다.",
+        "아래 프롬프트는 Codex/Research Request 이미지 생성으로 처리할 장별 요청입니다.",
         "각 이미지는 생성 후 `CODEX_OUTPUT_DIR`에 저장하면 파이프라인이 최신 PNG를 찾아 사용합니다.",
         "",
     ]
@@ -113,7 +117,7 @@ def generate_codex_local_backgrounds(prompts, output_dir):
         output_path = os.path.join(output_dir, f"page{index}_bg.png")
         img.save(output_path, "PNG")
         output_paths.append(output_path)
-        print(f"  - Antigravity 폴백 로컬 배경 생성: {output_path}")
+        print(f"  - Codex/Research Request 폴백 로컬 배경 생성: {output_path}")
 
     return output_paths
 
@@ -121,16 +125,16 @@ def generate_codex_local_backgrounds(prompts, output_dir):
 def collect_codex_images(prompts, output_dir, run_started_at):
     write_codex_image_brief(prompts)
 
-    generated_by_antigravity = []
+    generated_by_request = []
     for index, prompt in enumerate(prompts, start=1):
         output_path = os.path.join(output_dir, f"page{index}_bg.png")
         result = run_image_task(prompt, output_path)
         if result:
-            generated_by_antigravity.append(result)
+            generated_by_request.append(result)
 
-    if len(generated_by_antigravity) == len(prompts):
-        print("[Image Gen] Antigravity CLI 이미지 생성 완료.")
-        return generated_by_antigravity
+    if len(generated_by_request) == len(prompts):
+        print("[Image Gen] Codex/Research Request 이미지 생성 완료.")
+        return generated_by_request
 
     wait_seconds = int(os.getenv("CODEX_IMAGE_WAIT_SECONDS", "0"))
     explicit_dir = os.getenv("CODEX_OUTPUT_DIR", "").strip()
@@ -139,14 +143,14 @@ def collect_codex_images(prompts, output_dir, run_started_at):
         import time
         time.sleep(wait_seconds)
     elif not explicit_dir:
-        print("[Image Gen] Antigravity 이미지 요청 파일만 생성했습니다. 대기 시간이 0초라 이미지 탐색을 생략합니다.")
-        print("  - 요청 파일: codex_image_requests.md")
+        print("[Image Gen] Codex Image Request 파일만 생성했습니다. 대기 시간이 0초라 이미지 탐색을 생략합니다.")
+        print(f"  - 요청 파일: {IMAGE_REQUEST_FILE}")
         return []
 
     found_images = find_codex_images(len(prompts), run_started_at)
     if len(found_images) < len(prompts):
-        print("[Image Gen] Antigravity/외부 산출 이미지가 충분하지 않아 로컬 폴백 배경을 생성합니다.")
-        print("  - 요청 파일: codex_image_requests.md")
+        print("[Image Gen] Codex/External 산출 이미지가 충분하지 않아 로컬 폴백 배경을 생성합니다.")
+        print(f"  - 요청 파일: {IMAGE_REQUEST_FILE}")
         return generate_codex_local_backgrounds(prompts, output_dir)
 
     output_paths = []
