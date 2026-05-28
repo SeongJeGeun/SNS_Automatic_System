@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+REQUEST_LABEL = "Codex/Research Request"
+
 
 def _truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -74,11 +76,12 @@ def run_text_task(
     request_path: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
 ) -> Optional[Any]:
-    """Run Antigravity CLI and persist a validated text or JSON result.
+    """Run a configured research CLI and persist a validated text or JSON result.
 
-    Configure the command with ANTIGRAVITY_TEXT_COMMAND. Supported placeholders:
-    {prompt_file}, {output_file}, {mode}. If no placeholders are used, the
-    prompt is sent through stdin and stdout is written to output_path.
+    Configure the command with ANTIGRAVITY_TEXT_COMMAND for backward
+    compatibility. Supported placeholders: {prompt_file}, {output_file}, {mode}.
+    If no placeholders are used, the prompt is sent through stdin and stdout is
+    written to output_path.
     """
     if not antigravity_enabled():
         return None
@@ -90,7 +93,7 @@ def run_text_task(
     timeout = timeout_seconds or int(os.getenv("ANTIGRAVITY_TIMEOUT_SECONDS", "300"))
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="antigravity_bridge_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="research_bridge_") as tmp_dir:
         prompt_file = request_path or os.path.join(tmp_dir, f"{mode}_prompt.md")
         cli_output_file = os.path.join(tmp_dir, f"{mode}_output.txt")
 
@@ -116,7 +119,7 @@ def run_text_task(
                 cwd=os.getcwd(),
             )
         except Exception as exc:
-            print(f"[Antigravity] CLI 실행 실패 ({mode}): {exc}")
+            print(f"[{REQUEST_LABEL}] CLI 실행 실패 ({mode}): {exc}")
             return None
 
         output_text = ""
@@ -127,13 +130,13 @@ def run_text_task(
             output_text = result.stdout
 
         if result.returncode != 0:
-            print(f"[Antigravity] CLI 오류 ({mode}): {result.stderr.strip()[:500]}")
+            print(f"[{REQUEST_LABEL}] CLI 오류 ({mode}): {result.stderr.strip()[:500]}")
             return None
 
         if expect_json:
             parsed = _extract_json(output_text)
             if not parsed:
-                print(f"[Antigravity] JSON 파싱 실패 ({mode}). 원문 일부: {output_text[:300]}")
+                print(f"[{REQUEST_LABEL}] JSON 파싱 실패 ({mode}). 원문 일부: {output_text[:300]}")
                 return None
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(parsed, f, ensure_ascii=False, indent=2)
@@ -146,7 +149,7 @@ def run_text_task(
 
 def run_json_task(prompt: str, output_path: str, mode: str, request_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     json_prompt = f"""
-You are running inside Antigravity CLI for the MindFactory SNS automation project.
+You are running inside the MindFactory SNS automation project research bridge.
 Return only valid JSON. Do not include markdown fences or explanatory text.
 
 {prompt}
@@ -162,7 +165,7 @@ Return only valid JSON. Do not include markdown fences or explanatory text.
 
 def run_search_task(prompt: str, output_path: str, request_path: Optional[str] = None) -> Optional[str]:
     search_prompt = f"""
-You are running inside Antigravity CLI for the MindFactory SNS automation project.
+You are running inside the MindFactory SNS automation project research bridge.
 Research the requested topics using your available search/browsing capability.
 Write a concise Korean markdown report with:
 - 핵심 요약
@@ -191,7 +194,7 @@ def run_image_task(prompt: str, output_path: str, request_path: Optional[str] = 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     timeout = int(os.getenv("ANTIGRAVITY_IMAGE_TIMEOUT_SECONDS", os.getenv("ANTIGRAVITY_TIMEOUT_SECONDS", "300")))
 
-    with tempfile.TemporaryDirectory(prefix="antigravity_image_") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="research_image_") as tmp_dir:
         prompt_file = request_path or os.path.join(tmp_dir, "image_prompt.txt")
         if not request_path:
             with open(prompt_file, "w", encoding="utf-8") as f:
@@ -208,11 +211,11 @@ def run_image_task(prompt: str, output_path: str, request_path: Optional[str] = 
                 cwd=os.getcwd(),
             )
         except Exception as exc:
-            print(f"[Antigravity] 이미지 CLI 실행 실패: {exc}")
+            print(f"[{REQUEST_LABEL}] 이미지 CLI 실행 실패: {exc}")
             return None
 
         if result.returncode != 0:
-            print(f"[Antigravity] 이미지 CLI 오류: {result.stderr.strip()[:500]}")
+            print(f"[{REQUEST_LABEL}] 이미지 CLI 오류: {result.stderr.strip()[:500]}")
             return None
 
         return output_path if os.path.exists(output_path) and os.path.getsize(output_path) > 0 else None
