@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 
 
 def build_quality_wrapper(app, eval_once):
@@ -11,50 +12,64 @@ def build_quality_wrapper(app, eval_once):
                 return True
             if attempt > max_retries:
                 break
-            print(f"[Quality Loop] 품질 미통과 → 대본 재생성 {attempt}/{max_retries}")
+            print(f"[Quality Loop] retry script generation {attempt}/{max_retries}")
             app.run_generator_script(diversify=True)
 
         for round_no in range(1, max_strategy_rounds + 1):
-            print(f"[Quality Loop] 재시도 초과 → 트렌드/오디언스/전략 재분석 {round_no}/{max_strategy_rounds}")
-
+            print(f"[Quality Loop] refresh strategy context {round_no}/{max_strategy_rounds}")
             try:
                 from constants import OBSIDIAN_VAULT_PATH
                 app.search_and_save_trends(OBSIDIAN_VAULT_PATH)
             except Exception as exc:
-                print(f"[Quality Loop] 트렌드 재분석 스킵: {exc}")
-
+                print(f"[Quality Loop] trend refresh skipped: {exc}")
             try:
                 app.create_audience_insight()
             except Exception as exc:
-                print(f"[Quality Loop] 오디언스 재분석 스킵: {exc}")
-
+                print(f"[Quality Loop] audience refresh skipped: {exc}")
             try:
                 app.create_content_strategy()
             except Exception as exc:
-                print(f"[Quality Loop] 전략 재분석 스킵: {exc}")
-
+                print(f"[Quality Loop] strategy refresh skipped: {exc}")
             app.run_generator_script(diversify=True)
-
             for attempt in range(1, max_retries + 2):
                 if eval_once():
                     return True
                 if attempt > max_retries:
                     break
-                print(f"[Quality Loop] 재분석 후 품질 미통과 → 대본 재생성 {attempt}/{max_retries}")
+                print(f"[Quality Loop] retry after refresh {attempt}/{max_retries}")
                 app.run_generator_script(diversify=True)
 
-        print("[Quality Loop] 최종 품질 미통과 → research_failed_quality")
+        print("[Quality Loop] final status: research_failed_quality")
         try:
-            app.update_pipeline(
-                state="stopped",
-                last_result="research_failed_quality",
-            )
+            app.update_pipeline(state="stopped", last_result="research_failed_quality")
             app.write_human_summary()
         except Exception:
             pass
         return False
 
     return wrapped_eval
+
+
+def _interval_seconds():
+    return int(os.getenv("PIPELINE_INTERVAL_SECONDS", "10800"))
+
+
+def _next_run_at(seconds):
+    return (datetime.now() + timedelta(seconds=seconds)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _patch_pipeline_interval(app, state):
+    seconds = _interval_seconds()
+    try:
+        app.update_pipeline(
+            state=state,
+            interval_seconds=seconds,
+            next_run_at=_next_run_at(seconds),
+            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        app.write_human_summary()
+    except Exception as exc:
+        print(f"[Cycle Wrapper] interval status update skipped: {exc}")
 
 
 def main():
@@ -77,11 +92,11 @@ def main():
         content_evaluator.evaluate_script_quality,
     )
 
-    print("[Cycle Wrapper] 3시간 업로드 모드 실행")
-    print("[Cycle Wrapper] 품질 재시도 + 트렌드/전략 재분석 fallback 활성화")
-    print("[Cycle Wrapper] RUN_MODE=publish, Instagram publish enabled, Threads text-only enabled")
-    print("[Cycle Wrapper] RUN_ONCE=true → launchd가 3시간 주기를 담당하고 Python은 1회 실행 후 종료")
+    _patch_pipeline_interval(main_orchestrator, "starting")
+    print("[Cycle Wrapper] 3 hour publish mode enabled")
+    print("[Cycle Wrapper] RUN_ONCE=true; launchd owns the 3 hour schedule")
     main_orchestrator.run_orchestration_loop()
+    _patch_pipeline_interval(main_orchestrator, "waiting")
 
 
 if __name__ == "__main__":
