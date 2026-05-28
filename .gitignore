@@ -11,7 +11,6 @@ token.json
 client_secrets.json
 google_creds.json
 credentials*.json
-
 # Generated runtime artifacts
 page*.png
 generated_backgrounds/
@@ -44,8 +43,12 @@ codex_strategy_requests.md
 codex_strategy_response.json
 codex_news_requests.md
 report_sent_*.txt
-
 # Local vector DB/cache
 faiss_index/
 .running.lock
 .venv/
+# Local generated reports and media
+daily_report_*.md
+# Runtime sync/cache outputs
+jobs/
+shared/performance_log.json
