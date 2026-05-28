@@ -16,6 +16,7 @@ import gspread
 
 # import upload_carousel module directly for seamless programmatic call
 import upload_carousel
+import threads_publisher
 from card_renderer import generate_card_news_images
 from audience_research import create_audience_insight
 from content_strategy import create_content_strategy
@@ -329,7 +330,6 @@ def run_generator_script(diversify=False):
     if diversify:
         env["FORCE_DIVERSIFICATION"] = "True"
     try:
-        # subprocess로 완전히 고립된 프로세스로 구동시켜 PyTorch/Torch 스레드 데드락 현상을 원천 차단합니다.
         subprocess.run(
             ["python3", "self_healing_generator.py"],
             env=env,
@@ -342,7 +342,6 @@ def run_generator_script(diversify=False):
 # G. 구글 드라이브 임시 호스팅 & 릴리즈 & 클리닝
 # =====================================================================
 def upload_temp_image_to_drive(drive_service, file_path, folder_id):
-    """구글 드라이브에 임시 이미지 업로드 및 퍼블릭 읽기 권한을 주어 직접 다운로드 링크 생성"""
     if not drive_service:
         return "mock_id", f"https://example.com/{os.path.basename(file_path)}"
 
@@ -354,7 +353,6 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
     media = MediaFileUpload(file_path, mimetype='image/png')
 
     try:
-        # 1. 파일 임시 생성
         file = drive_service.files().create(
             body=file_metadata,
             media_body=media,
@@ -362,7 +360,6 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
         ).execute()
         file_id = file.get('id')
 
-        # 2. 링크 권한을 '모든 사용자(Anyone)'에게 부여
         permission = {
             'role': 'reader',
             'type': 'anyone'
@@ -372,7 +369,6 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
             body=permission
         ).execute()
 
-        # 3. 직접 다운로드 302 리디렉션 주소 조립
         direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         print(f"  - 드라이브 임시 업로드 완료: {file_name} -> {direct_url}")
         return file_id, direct_url
@@ -381,7 +377,6 @@ def upload_temp_image_to_drive(drive_service, file_path, folder_id):
         return None, None
 
 def clean_drive_temp_files(drive_service, file_ids):
-    """구글 드라이브 임시 호스팅 파일 완전 청소"""
     if not drive_service or not file_ids:
         return
     print("\n[Step 4] 구글 드라이브 내 임시 호스팅 이미지 삭제 중...")
@@ -411,7 +406,6 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
     if now.hour >= 9:
         print(f"\n📢 [일일 보고] 아침 9시 이후가 되어 일일 성과 보고서를 생성합니다...")
 
-        # 이전 날짜의 리포트 태그 파일 청소
         import glob
         for old_tag in glob.glob("agent_runs/report_sent_*.txt"):
             if old_tag != report_tag_file:
@@ -456,7 +450,7 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
 
                 file_metadata = {
                     "name": doc_title,
-                    "mimeType": "application/vnd.google-apps.document", # 구글 독스로 자동 변환
+                    "mimeType": "application/vnd.google-apps.document",
                     "parents": [report_folder_id]
                 }
 
@@ -478,6 +472,67 @@ def check_and_create_daily_report(drive_service, docs_service, worksheet, report
                 print("[Warning] drive_service가 준비되지 않아 보고서 생성을 생략합니다.")
         except Exception as e:
             print(f"[Error] 일일 보고서 업로드 중 예외 발생: {e}")
+
+
+# =====================================================================
+# I. SNS 발행 (Instagram + Threads 독립 실행) — 핵심 변경 블록
+# =====================================================================
+def run_sns_publish(script_data, direct_urls, gsm):
+    """
+    Instagram과 Threads를 각각 독립적으로 발행한다.
+    - 어느 쪽이 실패해도 예외를 raise하지 않는다.
+    - 결과는 텔레그램으로 즉시 보고한다.
+    - 반환값: (instagram_ok: bool, threads_ok: bool)
+    """
+    topic = script_data.get("title", "SNS 콘텐츠")
+    pages_count = len(script_data.get("pages", []))
+    instagram_ok = False
+    threads_ok = False
+
+    # ── Instagram ──────────────────────────────────────────────────
+    with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
+        try:
+            if len(direct_urls) == pages_count:
+                instagram_ok = upload_carousel.main(
+                    override_urls=direct_urls, sheet_manager=gsm
+                )
+            else:
+                print(f"[Instagram] URL 수 불일치 ({len(direct_urls)}/{pages_count}) — 발행 건너뜀")
+        except Exception as e:
+            print(f"⚠️ [Instagram] 예외 발생: {e} — 패스")
+
+    if instagram_ok:
+        send_telegram_message(
+            f"✅ [Instagram 발행 성공]\n주제: {topic}\n카러셀 {pages_count}장 업로드 완료."
+        )
+    else:
+        send_telegram_message(
+            f"⚠️ [Instagram 발행 실패]\n주제: {topic}\n이번 회차 인스타 발행 건너뜀. 다음 회차({os.getenv('PIPELINE_INTERVAL_SECONDS', '21600')}초 후)에 재시도."
+        )
+
+    # ── Threads ────────────────────────────────────────────────────
+    with agent_step("Threads Agent", "Threads 포스트 발행"):
+        try:
+            # page1.png의 드라이브 URL이 있으면 이미지 포스트, 없으면 텍스트 포스트
+            threads_image_url = direct_urls[0] if direct_urls else None
+            threads_ok = threads_publisher.main(
+                script_data=script_data,
+                image_url=threads_image_url,
+            )
+        except Exception as e:
+            print(f"⚠️ [Threads] 예외 발생: {e} — 패스")
+
+    if threads_ok:
+        send_telegram_message(
+            f"✅ [Threads 발행 성공]\n주제: {topic}\n포스트 업로드 완료."
+        )
+    else:
+        send_telegram_message(
+            f"⚠️ [Threads 발행 실패]\n주제: {topic}\n이번 회차 Threads 발행 건너뜀. 다음 회차에 재시도."
+        )
+
+    return instagram_ok, threads_ok
+
 
 def send_pipeline_report(topic, result_status, detail):
     message = (
@@ -537,7 +592,7 @@ def run_orchestration_loop():
             except Exception as e:
                 print(f"[Warning] 이전 자가치유 전략 파일 삭제 실패: {e}")
 
-    # Antigravity CLI 검색을 위한 트렌드 조사 요청/결과 파일 저장
+    # Antigravity CLI 트렌드 조사
     try:
         with agent_step("Trend Agent", "인스타그램 트렌드 검색/저장"):
             from constants import OBSIDIAN_VAULT_PATH
@@ -553,7 +608,7 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Warning] 인사이트 업데이트/전략 반영 단계 실패: {e}")
 
-    # 옵시디언 메모 벡터 DB 실시간 동적 갱신 및 빌드
+    # 옵시디언 RAG 인덱싱
     try:
         with agent_step("RAG Agent", "옵시디언 메모 인덱싱"):
             print("\n[RAG] 대본 기획 전 옵시디언 보관소 실시간 인덱싱 가동...")
@@ -564,7 +619,7 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Warning] 옵시디언 RAG DB 자동 인덱싱 실패: {e}")
 
-    # 5. 사람들의 현재 삶/고민을 먼저 정리해 대본 생성의 입력값으로 고정
+    # 5. 오디언스 분석
     try:
         with agent_step("Audience Agent", "사람들의 현재 고민/감정 분석"):
             print("\n[Audience Agent] 요즘 사람들이 힘들어하는 지점과 필요한 메시지 분석...")
@@ -579,7 +634,7 @@ def run_orchestration_loop():
     except Exception as e:
         print(f"[Warning] 콘텐츠 전략 생성 실패: {e}")
 
-    # 6. 새 대본 기획
+    # 6. 대본 기획
     with agent_step("Story Agent", "카드뉴스 대본 생성"):
         run_generator_script(diversify=need_healing)
 
@@ -615,10 +670,7 @@ def run_orchestration_loop():
         write_human_summary()
         return
 
-    # 8. 구글 드라이브 임시 호스팅 연동 및 인스타그램 업로드
-    drive_file_ids = []
-    direct_urls = []
-
+    # 8. script.json 파싱
     script_file = "script.json"
     if not os.path.exists(script_file):
         print("[Error] script.json 파일이 존재하지 않아 진행할 수 없습니다.")
@@ -632,57 +684,51 @@ def run_orchestration_loop():
         print(f"[Error] script.json 파싱 실패: {e}")
         return
 
+    # 9. 구글 드라이브 임시 호스팅
+    drive_file_ids = []
+    direct_urls = []
+
     try:
         with agent_step("Hosting Agent", "Google Drive 임시 이미지 호스팅"):
             for i in range(1, pages_count + 1):
                 file_path = f"page{i}.png"
-                # 이미지를 주차 폴더의 하위 '보고서' 폴더(report_folder_id)에 업로드함
                 fid, durl = upload_temp_image_to_drive(drive_service, file_path, report_folder_id)
                 if fid and durl:
                     drive_file_ids.append(fid)
                     direct_urls.append(durl)
                 else:
-                    raise Exception("드라이브 임시 업로드에 실패했습니다.")
-
-        # 8. 인스타 발행 구동 (드라이브 주소 주입)
-        if len(direct_urls) == pages_count:
-            # 프로그램 호출 방식으로 깔끔하게 실행 (로컬 이미지 및 로그 기입까지 완료함)
-            with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
-                upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
-            if upload_success:
-                print("[Success] 이번 회차 파이프라인의 모든 공정이 완벽히 완료되었습니다.")
-                topic = script_data.get("title", "SNS 콘텐츠 업로드")
-                send_pipeline_report(
-                    topic,
-                    "성공 (인스타그램 발행 완료)",
-                    "업로드, 시트 기록, 임시 파일 정리 단계까지 완료했습니다.",
-                )
-            else:
-                raise Exception("인스타그램 카러셀 발행에 실패했습니다.")
-    except Exception as run_err:
-        print(f"[Error] 파이프라인 실행 중 예외 발생: {run_err}")
+                    raise Exception(f"드라이브 임시 업로드 실패: {file_path}")
+    except Exception as host_err:
+        print(f"[Error] 드라이브 호스팅 실패: {host_err}")
         update_pipeline(
             state="error",
             last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            last_result=str(run_err),
+            last_result=str(host_err),
         )
         write_human_summary()
-        try:
-            send_pipeline_report(
-                "파이프라인 구동 오류",
-                f"실패 (에러 발생: {run_err})",
-                "파이프라인 예외 복구 조치가 필요합니다.",
-            )
-        except Exception:
-            pass
         return
+
+    # 10. Instagram + Threads 독립 발행 (실패해도 파이프라인 계속)
+    try:
+        instagram_ok, threads_ok = run_sns_publish(script_data, direct_urls, gsm)
+
+        topic = script_data.get("title", "SNS 콘텐츠")
+        if instagram_ok or threads_ok:
+            result_summary = (
+                f"Instagram: {'✅ 성공' if instagram_ok else '⚠️ 실패'} | "
+                f"Threads: {'✅ 성공' if threads_ok else '⚠️ 실패'}"
+            )
+            print(f"[Pipeline] 발행 결과 — {result_summary}")
+        else:
+            print("[Pipeline] Instagram/Threads 모두 실패 — 다음 회차 재시도")
+
     finally:
-        # 9. 드라이브 임시 파일 클리닝 (어떤 에러가 발생하더라도 항상 지워지도록 보장)
+        # 11. 드라이브 임시 파일 클리닝 (항상 실행)
         if drive_file_ids:
             with agent_step("Cleanup Agent", "임시 호스팅 파일 정리"):
                 clean_drive_temp_files(drive_service, drive_file_ids)
 
-    # 10. 아침 9시 성과 보고서 체크
+    # 12. 아침 9시 성과 보고서
     with agent_step("Report Agent", "일일 보고서 생성 여부 확인"):
         check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id)
 
@@ -696,9 +742,7 @@ def run_orchestration_loop():
     write_human_summary()
 
 def main():
-    # .env에서 PIPELINE_INTERVAL_SECONDS 설정을 로드하며 기본값은 3시간(10800초)입니다.
-    # 초기 2일 동안은 하루 3~4회(6~8시간 주기)로 조절하기 위해 환경변수로 조율 가능하게 분리합니다.
-    INTERVAL_SECONDS = int(os.getenv("PIPELINE_INTERVAL_SECONDS", 3 * 3600))
+    INTERVAL_SECONDS = int(os.getenv("PIPELINE_INTERVAL_SECONDS", 6 * 3600))  # 기본 6시간
     update_pipeline(
         state="starting",
         interval_seconds=INTERVAL_SECONDS,
