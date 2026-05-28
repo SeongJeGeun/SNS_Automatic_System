@@ -13,6 +13,11 @@ CONTENT_TEMPLATE_PACK_FILE = os.getenv("CONTENT_TEMPLATE_PACK_FILE", os.path.joi
 FALLBACK_TEMPLATE_PACK = {
     "version": 0,
     "name": "fallback_content_topics",
+    "series_system": {
+        "series_name": "마인드팩토리 10분 회복 시리즈",
+        "next_episode_label": "다음 편 예고",
+        "fixed_cta": "저장해두고 다음에 흔들리는 날 다시 꺼내 보세요.",
+    },
     "defaults": {
         "subtitle": "Mind Factory 자동 기획",
         "structure": "pain hook -> cause reframe -> 3-step tips -> identity shift -> challenge CTA",
@@ -26,6 +31,11 @@ FALLBACK_TEMPLATE_PACK = {
         {
             "template_id": "small_routine_recovery",
             "topic_keys": ["execution_barrier", "routine_recovery"],
+            "series_name": "마인드팩토리 10분 회복 시리즈",
+            "weekday_slot": "wed",
+            "episode_role": "시작 장벽을 낮추는 실행 편",
+            "next_episode_hint": "다음 편에서는 비교 불안이 올라올 때 내 속도로 돌아오는 방법을 다룹니다.",
+            "fixed_cta": "댓글에 '10분 시작'이라고 남기고 바로 하나만 실행하세요.",
             "title": "작은 루틴이 무너진 하루를 구한다",
             "pain_heading": "계속 미루고 자책하고 있나요?",
             "pain_sub": "불안한데 시작은 안 되고, 비교만 하다 하루가 끝나는 밤.",
@@ -95,6 +105,12 @@ def _load_template_pack():
 def _template_defaults(pack):
     defaults = pack.get("defaults") if isinstance(pack, dict) else {}
     return defaults if isinstance(defaults, dict) else {}
+
+
+def _series_system(pack):
+    series = pack.get("series_system") if isinstance(pack, dict) else {}
+    fallback = FALLBACK_TEMPLATE_PACK.get("series_system", {})
+    return series if isinstance(series, dict) else fallback
 
 
 def _topic_templates(pack):
@@ -169,6 +185,31 @@ def _caption_body(defaults):
     return "거창한 변화보다 지금 가능한 10분을 먼저 만드세요.\n저장해두고 흔들리는 날 다시 꺼내 보세요."
 
 
+def _series_metadata(pack, template):
+    series = _series_system(pack)
+    return {
+        "series_name": _as_text(template.get("series_name"), _as_text(series.get("series_name"), "마인드팩토리 10분 회복 시리즈")),
+        "weekday_slot": _as_text(template.get("weekday_slot"), ""),
+        "episode_role": _as_text(template.get("episode_role"), ""),
+        "next_episode_hint": _as_text(template.get("next_episode_hint"), ""),
+        "fixed_cta": _as_text(template.get("fixed_cta"), _as_text(series.get("fixed_cta"), "")),
+        "next_episode_label": _as_text(series.get("next_episode_label"), "다음 편 예고"),
+    }
+
+
+def _series_caption_block(meta):
+    lines = []
+    if meta.get("series_name"):
+        lines.append(f"시리즈: {meta['series_name']}")
+    if meta.get("episode_role"):
+        lines.append(f"이번 편: {meta['episode_role']}")
+    if meta.get("fixed_cta"):
+        lines.append(meta["fixed_cta"])
+    if meta.get("next_episode_hint"):
+        lines.append(f"{meta.get('next_episode_label', '다음 편 예고')}: {meta['next_episode_hint']}")
+    return "\n".join(lines)
+
+
 def generate_script(diversify=False):
     pack = _load_template_pack()
     defaults = _template_defaults(pack)
@@ -193,14 +234,18 @@ def generate_script(diversify=False):
     pages = _build_pages(template)
     structure = defaults.get("structure", FALLBACK_TEMPLATE_PACK["defaults"]["structure"])
     subtitle = defaults.get("subtitle", "Mind Factory 자동 기획")
+    series_meta = _series_metadata(pack, template)
+    series_caption = _series_caption_block(series_meta)
 
     script = {
         "title": title,
         "subtitle": subtitle,
+        "series": series_meta,
         "caption": (
             f"{hook_strategy}\n\n"
             f"오늘의 주제: {title}\n"
             f"{_caption_body(defaults)}\n\n"
+            f"{series_caption}\n\n"
             f"{template['tags']}"
         ),
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -210,6 +255,8 @@ def generate_script(diversify=False):
             "structure": structure,
             "template_id": template.get("template_id"),
             "template_title": template["title"],
+            "series_name": series_meta.get("series_name"),
+            "episode_role": series_meta.get("episode_role"),
             "ceo_topic_key": ceo_guidance.get("topic_key"),
             "ceo_emotion_axis": ceo_guidance.get("emotion_axis"),
         },
@@ -220,6 +267,7 @@ def generate_script(diversify=False):
             "template_rotation": True,
             "template_pack_file": CONTENT_TEMPLATE_PACK_FILE,
             "template_pack_name": pack.get("name"),
+            "template_pack_version": pack.get("version"),
             "ceo_topic_guidance": bool(ceo_guidance),
         },
         "pages": pages,
