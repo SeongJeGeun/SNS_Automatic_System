@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "mind_factory_ceo_topic_pool",
   "description": "CEO topic candidate pool used before each publish cycle.",
   "series_system": {
@@ -64,6 +64,39 @@
       "next_episode_hint": "다음 편에서는 일과 커리어 압박이 심한 날 다시 중심을 잡는 방법을 다룹니다.",
       "avoid_after": ["lonely_night_reset"],
       "why_now": "밤 시간대 감정 붕괴와 자기비난을 완충하는 저장형 콘텐츠"
+    },
+    {
+      "topic_key": "career_pressure_reset",
+      "topic_title": "일과 커리어 압박이 심한 날 중심 잡기",
+      "emotion_axis": "일/커리어 압박",
+      "weekday_slot": "fri",
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "episode_role": "일과 커리어 압박 회복 편",
+      "next_episode_hint": "다음 편에서는 관계에서 흔들린 자존감을 다시 세우는 방법을 다룹니다.",
+      "avoid_after": ["career_pressure_reset"],
+      "why_now": "금요일의 업무 피로와 성과 압박을 주말 전 회복 루틴으로 정리"
+    },
+    {
+      "topic_key": "relationship_selfworth",
+      "topic_title": "관계에서 흔들린 자존감을 다시 세우는 법",
+      "emotion_axis": "관계/자존감",
+      "weekday_slot": "sat",
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "episode_role": "관계와 자존감 회복 편",
+      "next_episode_hint": "다음 편에서는 다음 주를 덜 무너지게 만드는 루틴 설계법을 다룹니다.",
+      "avoid_after": ["relationship_selfworth"],
+      "why_now": "주말 관계 피로와 인정 욕구를 자기 기준 회복 콘텐츠로 전환"
+    },
+    {
+      "topic_key": "weekly_routine_design",
+      "topic_title": "다음 주를 덜 무너지게 만드는 루틴 설계",
+      "emotion_axis": "다음 주 루틴 설계",
+      "weekday_slot": "sun",
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "episode_role": "다음 주 루틴 설계 편",
+      "next_episode_hint": "다음 편에서는 비교 불안에서 벗어나 내 속도를 되찾는 방법을 다룹니다.",
+      "avoid_after": ["weekly_routine_design"],
+      "why_now": "일요일 밤 불안과 월요일 부담을 미리 낮추는 저장형 콘텐츠"
     }
   ]
 }
