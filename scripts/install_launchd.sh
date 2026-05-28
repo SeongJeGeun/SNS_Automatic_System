@@ -30,7 +30,7 @@ cat > "$PLIST_PATH" <<PLIST
   <string>$PROJECT_DIR</string>
 
   <key>StartInterval</key>
-  <integer>21600</integer>
+  <integer>10800</integer>
 
   <key>RunAtLoad</key>
   <true/>
@@ -53,7 +53,7 @@ cat <<EOF
 
 Plist: $PLIST_PATH
 Project: $PROJECT_DIR
-Interval: 21600 seconds, every 6 hours
+Interval: 10800 seconds, every 3 hours
 Logs:
 - $LOG_DIR/run_cycle.log
 - $LOG_DIR/launchd.out.log

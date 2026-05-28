@@ -17,8 +17,9 @@ echo "============================================================"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] SNS automation cycle started"
 echo "Project: $PROJECT_DIR"
 echo "Branch: $BRANCH"
-echo "RUN_MODE=${RUN_MODE:-research}"
+echo "RUN_MODE=${RUN_MODE:-publish}"
 echo "RAG_MODE=${RAG_MODE:-search}"
+echo "PIPELINE_INTERVAL_SECONDS=${PIPELINE_INTERVAL_SECONDS:-10800}"
 
 if [ -f "$LOCK_FILE" ]; then
   echo "Another cycle is already running. Skip this run."
@@ -70,14 +71,17 @@ echo "[5/7] Sync Python dependencies"
 PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install -q -r requirements.txt
 
 echo "[6/7] Run main orchestrator"
-export RUN_MODE="${RUN_MODE:-research}"
+export PIPELINE_INTERVAL_SECONDS="${PIPELINE_INTERVAL_SECONDS:-10800}"
+export RUN_MODE="${RUN_MODE:-publish}"
 export RAG_MODE="${RAG_MODE:-search}"
-export SKIP_IMAGE_GENERATION="${SKIP_IMAGE_GENERATION:-true}"
-export SKIP_DRIVE_UPLOAD="${SKIP_DRIVE_UPLOAD:-true}"
-export SKIP_INSTAGRAM_PUBLISH="${SKIP_INSTAGRAM_PUBLISH:-true}"
-export SKIP_THREADS_IMAGE_PUBLISH="${SKIP_THREADS_IMAGE_PUBLISH:-true}"
+export SKIP_IMAGE_GENERATION="${SKIP_IMAGE_GENERATION:-false}"
+export SKIP_DRIVE_UPLOAD="${SKIP_DRIVE_UPLOAD:-false}"
+export SKIP_INSTAGRAM_PUBLISH="${SKIP_INSTAGRAM_PUBLISH:-false}"
+export SKIP_THREADS_IMAGE_PUBLISH="${SKIP_THREADS_IMAGE_PUBLISH:-false}"
+export MAX_QUALITY_RETRIES="${MAX_QUALITY_RETRIES:-5}"
+export MAX_STRATEGY_REANALYSIS="${MAX_STRATEGY_REANALYSIS:-1}"
 export PYTHONUNBUFFERED=1
-python3 -u main_orchestrator.py
+python3 -u run_publish_cycle.py
 
 echo "[7/7] Commit safe tracked output changes if any"
 git add README.md docs .env.example run_cycle.sh scripts/install_launchd.sh 2>/dev/null || true
