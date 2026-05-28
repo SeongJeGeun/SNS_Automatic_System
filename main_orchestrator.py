@@ -34,6 +34,33 @@ from telegram_agent import (
 )
 
 
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def get_run_mode():
+    return os.getenv("RUN_MODE", "research").strip().lower()
+
+
+def should_skip_image_generation():
+    return env_bool("SKIP_IMAGE_GENERATION", get_run_mode() == "research")
+
+
+def should_skip_drive_upload():
+    return env_bool("SKIP_DRIVE_UPLOAD", get_run_mode() == "research")
+
+
+def should_skip_instagram_publish():
+    return env_bool("SKIP_INSTAGRAM_PUBLISH", get_run_mode() == "research")
+
+
+def should_skip_threads_image_publish():
+    return env_bool("SKIP_THREADS_IMAGE_PUBLISH", get_run_mode() == "research")
+
+
 def get_dynamic_wait_seconds(default_seconds):
     try:
         from optimal_timing import get_recommended_sleep_seconds
@@ -296,252 +323,216 @@ def analyze_and_generate_strategy(last_title, last_content, impressions):
 [인터넷 실시간 검색 트렌드 자료]
 {search_results}
 
-위 자료들과 마인드팩토리 고유 브랜드 가치(규율, 몰입, 멘탈팩폭)를 결합하여, 다음 카드뉴스를 기획할 때 반영할 구체적인 '개선 전략'을 작성해줘.
-원인 분석과 개선 사항은 날카롭고 구체적이어야 해.
-
-출력 형식은 반드시 아래 JSON 스키마를 따르는 순수 JSON 객체여야 해. 다른 텍스트나 설명은 절대 포함하지 마.
-
-{{
-  "analysis": "왜 이 주제나 어조가 독자들에게 어필하지 못했는지 구체적인 원인 분석",
-  "action_items": "비주얼(배경 테마 선택, 디바이더) 및 카피라이팅(1장 헤드라인 후킹, 명조/고딕 타이포) 차원에서의 명확한 개선 포인트",
-  "prompt_injection": "다음 카드뉴스 대본 생성 AI에게 강제로 주입할 구체적인 디자인 및 카피 지시문 (예: '이번에는 Cream 배경에 Muted Blue 선을 극도로 절제해 쓰고, 헤드라인을 [~하는 짓은 당장 멈춰라] 식의 극약 처방 어조로 써라')"
-}}
+위 자료들과 마인드팩토리의 브랜드 철학을 결합해 다음 포스팅에 적용할
+1. 실패 원인 가설 3가지
+2. 개선된 후킹 전략
+3. 새로운 비주얼 컨셉
+4. 재시도용 콘텐츠 방향성
+을 JSON 형식으로 작성해줘.
 """
-    from codex_text_bridge import read_json_response, write_strategy_request
-    strategy_data = write_strategy_request(prompt) or read_json_response("codex_strategy_response.json")
-    if not strategy_data:
-        strategy_data = {
-            "analysis": "Antigravity 전략 응답 파일이 아직 없어 로컬 규칙으로 보수 판단합니다.",
-            "action_items": "1장 훅은 독자의 현재 고통을 더 구체화하고, 중간 장에는 바로 실행 가능한 3단계 행동을 넣고, 마지막 장은 저장 이유가 분명한 체크리스트로 구성합니다.",
-            "prompt_injection": "이번 카드뉴스는 공감형 후킹, 3단계 실천 요약, 저장용 체크리스트를 반드시 포함하고 자극적인 색과 과한 훈계톤을 피한다.",
+
+    request_file = "codex_strategy_requests.md"
+    response_file = "codex_strategy_response.json"
+    with open(request_file, "w", encoding="utf-8") as f:
+        f.write(prompt)
+    print(f"[Antigravity] 전략 분석 요청 파일 생성: {request_file}")
+
+    try:
+        import subprocess
+        proc = subprocess.run(
+            ["antigravity", "run", "--input", request_file, "--output", response_file],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if proc.returncode != 0:
+            print(f"[Warning] Antigravity 전략 실행 실패: {proc.stderr.strip()}")
+    except FileNotFoundError:
+        print("[Warning] Antigravity CLI가 설치되어 있지 않아 전략 요청 파일만 생성했습니다.")
+    except Exception as e:
+        print(f"[Warning] Antigravity 전략 실행 중 예외: {e}")
+
+    if os.path.exists(response_file):
+        try:
+            with open(response_file, "r", encoding="utf-8") as f:
+                strategy_json = json.load(f)
+        except Exception:
+            strategy_json = {"raw_response": open(response_file, encoding="utf-8").read()}
+    else:
+        strategy_json = {
+            "hypotheses": [
+                "초반 훅이 감정적 긴장감을 충분히 만들지 못했을 가능성",
+                "슬라이드별 행동 지침이 추상적이어서 저장 가치가 낮았을 가능성",
+                "비주얼 톤이 이전 게시물과 유사해 피드 내 차별성이 약했을 가능성",
+            ],
+            "hook_strategy": "첫 장에서 독자의 현재 고통을 단정적으로 명명하고, 마지막 장에서 즉시 따라 할 수 있는 루틴을 제시한다.",
+            "visual_concept": "어두운 배경 + 강한 대비 텍스트 + 1슬라이드 1문장 중심의 압박감 있는 카드뉴스",
+            "next_direction": "번아웃/무기력/자기혐오에서 벗어나는 3단계 행동 루틴",
         }
 
     with open("self_healing_strategy.json", "w", encoding="utf-8") as f:
-        json.dump(strategy_data, f, ensure_ascii=False, indent=2)
-    print("✅ Antigravity 중심 자가치유 전략 파일 저장 완료: self_healing_strategy.json")
+        json.dump(strategy_json, f, ensure_ascii=False, indent=2)
+    print("✅ 자가치유 전략이 self_healing_strategy.json에 저장되었습니다.")
 
 # =====================================================================
-# E. 자기치유 기반 대본 기획
+# E. 대본 생성 에이전트 호출
 # =====================================================================
 def run_generator_script(diversify=False):
     print("\n[Step 1] 대본 자동 기획 가동...")
-    import subprocess
-    env = os.environ.copy()
-    if diversify:
-        env["FORCE_DIVERSIFICATION"] = "True"
-    try:
-        subprocess.run(
-            ["python3", "self_healing_generator.py"],
-            env=env,
-            check=True
-        )
-    except Exception as e:
-        print(f"[Warning] 대본 생성 모듈 실행 중 예외 감지: {e}")
+    import generator
+    generator.generate_script(diversify=diversify)
 
 # =====================================================================
-# G. 구글 드라이브 임시 호스팅 & 릴리즈 & 클리닝
+# F. 구글 드라이브 임시 이미지 호스팅
 # =====================================================================
 def upload_temp_image_to_drive(drive_service, file_path, folder_id):
     if not drive_service:
-        return "mock_id", f"https://example.com/{os.path.basename(file_path)}"
-
-    file_name = os.path.basename(file_path)
-    file_metadata = {
-        "name": file_name,
-        "parents": [folder_id]
-    }
-    media = MediaFileUpload(file_path, mimetype='image/png')
-
-    try:
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id'
-        ).execute()
-        file_id = file.get('id')
-
-        permission = {
-            'role': 'reader',
-            'type': 'anyone'
-        }
-        drive_service.permissions().create(
-            fileId=file_id,
-            body=permission
-        ).execute()
-
-        direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        print(f"  - 드라이브 임시 업로드 완료: {file_name} -> {direct_url}")
-        return file_id, direct_url
-    except Exception as e:
-        print(f"[Error] 드라이브 임시 업로드 실패 ({file_name}): {e}")
+        return None, f"mock_public_url_for_{file_path}"
+    if not os.path.exists(file_path):
         return None, None
 
+    file_metadata = {"name": os.path.basename(file_path), "parents": [folder_id]}
+    media = MediaFileUpload(file_path, mimetype="image/png")
+    file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    file_id = file.get("id")
+
+    drive_service.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+    ).execute()
+
+    direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    print(f"  - 드라이브 임시 업로드 완료: {file_path} -> {direct_url}")
+    return file_id, direct_url
+
+
 def clean_drive_temp_files(drive_service, file_ids):
-    if not drive_service or not file_ids:
+    if not drive_service:
         return
     print("\n[Step 4] 구글 드라이브 내 임시 호스팅 이미지 삭제 중...")
     for fid in file_ids:
-        if not fid:
-            continue
         try:
             drive_service.files().delete(fileId=fid).execute()
             print(f"  - 드라이브 임시 파일 삭제 성공: ID {fid}")
         except Exception as e:
-            print(f"  - 드라이브 임시 파일 삭제 실패: ID {fid} ({e})")
+            print(f"  - 드라이브 임시 파일 삭제 실패: ID {fid}, 이유: {e}")
 
 # =====================================================================
-# H. 일일 보고서 자동화 (아침 9시 트리거)
+# G. 일일 보고서 생성
 # =====================================================================
 def check_and_create_daily_report(drive_service, docs_service, worksheet, report_folder_id):
-    if not worksheet:
-        return
-
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    report_tag_file = f"agent_runs/report_sent_{today_str}.txt"
-
-    if os.path.exists(report_tag_file):
-        return
-
     now = datetime.now()
-    if now.hour >= 9:
-        print(f"\n📢 [일일 보고] 아침 9시 이후가 되어 일일 성과 보고서를 생성합니다...")
+    report_flag_file = f"report_sent_{now.strftime('%Y%m%d')}.txt"
 
-        import glob
-        for old_tag in glob.glob("agent_runs/report_sent_*.txt"):
-            if old_tag != report_tag_file:
-                try:
-                    os.remove(old_tag)
-                except Exception:
-                    pass
+    if now.hour < 9 or os.path.exists(report_flag_file):
+        return
 
-        records = worksheet.get_all_records()
-        total_posts = len(records)
-        total_impressions = 0
-        total_saved = 0
+    print("\n📢 [일일 보고] 아침 9시 이후가 되어 일일 성과 보고서를 생성합니다...")
+    report_content = f"# 마인드팩토리 SNS 일일 성과 보고 ({now.strftime('%Y-%m-%d')})\n\n"
+    report_content += "## 1. 오늘의 업로드 현황\n"
 
-        for r in records:
-            try:
-                total_impressions += int(r.get("조회수", 0))
-                total_saved += int(r.get("저장수", 0))
-            except ValueError:
-                continue
-
-        doc_title = f"마인드팩토리_일일보고서_{today_str}"
-
-        report_text = f"""======================================================
-🧠 마인드팩토리 일일 성과 보고서 ({today_str})
-======================================================
-
-1. 일일 콘텐츠 발행 현황
-- 총 발행 수: {total_posts}개
-- 누적 조회수(Impressions): {total_impressions}회
-- 누적 저장수(Saved): {total_saved}회
-
-2. AI 자가 분석 피드백
-- 현재 고유 브랜드 철학(성장, 규율, 몰입, 멘탈팩폭)에 입각하여 5장 분량의 카드뉴스가 스케줄대로 정상 발행 중입니다.
-- 조회수 및 저장수 데이터를 실시간 피드백하여, 노출 저조 시 즉각적으로 비주얼(형광 포인트 극대화) 및 카피 어조의 다각화 우회 모듈을 활성화함으로써 계정 건강성을 방어하고 있습니다.
-- 향후 조회수가 높은 상위 키워드(예: 규율의 힘 등)를 중심으로 제작 주기를 좁혀 가며 포커싱할 예정입니다.
-"""
-
+    rows = []
+    if worksheet:
         try:
-            if drive_service:
-                import io
-                from googleapiclient.http import MediaIoBaseUpload
-
-                file_metadata = {
-                    "name": doc_title,
-                    "mimeType": "application/vnd.google-apps.document",
-                    "parents": [report_folder_id]
-                }
-
-                fh = io.BytesIO(report_text.encode('utf-8'))
-                media = MediaIoBaseUpload(fh, mimetype='text/plain', resumable=True)
-
-                doc_file = drive_service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields="id"
-                ).execute()
-
-                doc_id = doc_file.get("id")
-                print(f"📁 구글 드라이브 내 보고서 폴더에 일일보고서 직접 생성 및 업로드 완료 (ID: {doc_id})")
-
-                with open(report_tag_file, "w") as f:
-                    f.write("sent")
-            else:
-                print("[Warning] drive_service가 준비되지 않아 보고서 생성을 생략합니다.")
+            all_records = worksheet.get_all_records()
+            today_str = now.strftime('%Y-%m-%d')
+            rows = [r for r in all_records if str(r.get('날짜', '')).startswith(today_str)]
         except Exception as e:
-            print(f"[Error] 일일 보고서 업로드 중 예외 발생: {e}")
+            print(f"[Warning] 시트 데이터 읽기 실패: {e}")
 
+    if not rows:
+        report_content += "- 아직 오늘 업로드 기록이 없습니다.\n"
+    else:
+        for r in rows:
+            report_content += f"- {r.get('타이틀', '제목 없음')} / 미디어ID: {r.get('미디어ID')} / 조회수: {r.get('조회수', 'N/A')}\n"
+
+    report_content += "\n## 2. 시스템 상태\n- 자동 기획/생성/업로드 파이프라인 정상 가동 중\n"
+
+    report_filename = f"daily_report_{now.strftime('%Y%m%d')}.md"
+    with open(report_filename, "w", encoding="utf-8") as f:
+        f.write(report_content)
+
+    if drive_service and docs_service:
+        file_metadata = {
+            "name": report_filename,
+            "mimeType": "application/vnd.google-apps.document",
+            "parents": [report_folder_id]
+        }
+        doc = drive_service.files().create(body=file_metadata, fields="id").execute()
+        doc_id = doc.get("id")
+        docs_service.documents().batchUpdate(
+            documentId=doc_id,
+            body={
+                "requests": [
+                    {"insertText": {"location": {"index": 1}, "text": report_content}}
+                ]
+            }
+        ).execute()
+        print(f"✅ 구글 Docs 일일 보고서 생성 완료: {doc_id}")
+    else:
+        print(f"✅ 로컬 일일 보고서 생성 완료: {report_filename}")
+
+    with open(report_flag_file, "w") as f:
+        f.write("sent")
 
 # =====================================================================
-# I. SNS 발행 (Instagram + Threads 독립 실행) — 핵심 변경 블록
+# H. SNS 채널별 독립 발행
 # =====================================================================
 def run_sns_publish(script_data, direct_urls, gsm):
-    """
-    Instagram과 Threads를 각각 독립적으로 발행한다.
-    - 어느 쪽이 실패해도 예외를 raise하지 않는다.
-    - 결과는 텔레그램으로 즉시 보고한다.
-    - 반환값: (instagram_ok: bool, threads_ok: bool)
-    """
     topic = script_data.get("title", "SNS 콘텐츠")
-    pages_count = len(script_data.get("pages", []))
     instagram_ok = False
     threads_ok = False
 
-    # ── Instagram ──────────────────────────────────────────────────
-    with agent_step("Publishing Agent", "Instagram 카러셀 발행"):
+    if should_skip_instagram_publish():
+        print("[Instagram] SKIP_INSTAGRAM_PUBLISH/RUN_MODE=research → Instagram 발행 전체를 건너뜁니다.")
+    else:
         try:
-            if len(direct_urls) == pages_count:
-                instagram_ok = upload_carousel.main(
-                    override_urls=direct_urls, sheet_manager=gsm
-                )
+            upload_success = upload_carousel.main(override_urls=direct_urls, sheet_manager=gsm)
+            instagram_ok = bool(upload_success)
+        except Exception as inst_err:
+            print(f"⚠️ [Instagram] 예외 발생: {inst_err} — 패스")
+            notify_publish_failure("Instagram", topic, "이번 회차 인스타 발행 건너뜀. 다음 회차(21600초 후)에 재시도.")
+
+    if should_skip_threads_image_publish():
+        print("[Threads] SKIP_THREADS_IMAGE_PUBLISH/RUN_MODE=research → Threads 이미지 발행을 건너뜁니다.")
+    else:
+        try:
+            post_id = threads_publisher.publish_image_post(direct_urls[0], threads_publisher.build_text_from_script(script_data))
+            if post_id:
+                threads_ok = True
             else:
-                print(f"[Instagram] URL 수 불일치 ({len(direct_urls)}/{pages_count}) — 발행 건너뜀")
-        except Exception as e:
-            print(f"⚠️ [Instagram] 예외 발생: {e} — 패스")
-
-    if instagram_ok:
-        send_telegram_message(
-            f"✅ [Instagram 발행 성공]\n주제: {topic}\n카러셀 {pages_count}장 업로드 완료."
-        )
-    else:
-        send_telegram_message(
-            f"⚠️ [Instagram 발행 실패]\n주제: {topic}\n이번 회차 인스타 발행 건너뜀. 다음 회차({os.getenv('PIPELINE_INTERVAL_SECONDS', '21600')}초 후)에 재시도."
-        )
-
-    # ── Threads ────────────────────────────────────────────────────
-    with agent_step("Threads Agent", "Threads 포스트 발행"):
-        try:
-            # page1.png의 드라이브 URL이 있으면 이미지 포스트, 없으면 텍스트 포스트
-            threads_image_url = direct_urls[0] if direct_urls else None
-            threads_ok = threads_publisher.main(
-                script_data=script_data,
-                image_url=threads_image_url,
-            )
-        except Exception as e:
-            print(f"⚠️ [Threads] 예외 발생: {e} — 패스")
-
-    if threads_ok:
-        send_telegram_message(
-            f"✅ [Threads 발행 성공]\n주제: {topic}\n포스트 업로드 완료."
-        )
-    else:
-        send_telegram_message(
-            f"⚠️ [Threads 발행 실패]\n주제: {topic}\n이번 회차 Threads 발행 건너뜀. 다음 회차에 재시도."
-        )
+                print("⚠️ [Threads] 발행 실패 (post_id 없음)")
+                notify_publish_failure("Threads", topic, "이번 회차 Threads 발행 건너뜀. 다음 회차에 재시도.")
+        except Exception as th_err:
+            print(f"⚠️ [Threads] 예외 발생: {th_err} — 패스")
+            notify_publish_failure("Threads", topic, "이번 회차 Threads 발행 건너뜀. 다음 회차에 재시도.")
 
     return instagram_ok, threads_ok
 
 
-def send_pipeline_report(topic, result_status, detail):
+def notify_publish_failure(channel, topic, detail):
     message = (
-        "마인드팩토리 SNS 자동화 보고\n\n"
+        f"⚠️ [{channel} 발행 실패]\n"
         f"주제: {topic}\n"
-        f"처리 결과: {result_status}\n\n"
-        f"상세:\n{detail}"
+        f"{detail}"
     )
     send_telegram_message(message)
+
+
+def finish_research_cycle(script_data):
+    topic = script_data.get("title", "SNS 콘텐츠")
+    print("[Pipeline] RUN_MODE=research → 이미지 생성/Drive 업로드/SNS 발행 없이 기획 산출물만 저장하고 종료합니다.")
+    send_telegram_message(
+        "✅ [Research Cycle 완료]\n"
+        f"주제: {topic}\n"
+        "이미지 생성과 SNS 발행은 건너뛰고, 대본/전략 산출물만 저장했습니다."
+    )
+    update_pipeline(
+        state="waiting",
+        last_run_finished_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        last_result="research_success",
+    )
+    write_human_summary()
 
 # =====================================================================
 # 통합 파이프라인 엔진
@@ -657,6 +648,23 @@ def run_orchestration_loop():
             write_human_summary()
             return
 
+    script_file = "script.json"
+    if not os.path.exists(script_file):
+        print("[Error] script.json 파일이 존재하지 않아 진행할 수 없습니다.")
+        return
+
+    try:
+        with open(script_file, "r", encoding="utf-8") as f:
+            script_data = json.load(f)
+        pages_count = len(script_data.get("pages", []))
+    except Exception as e:
+        print(f"[Error] script.json 파싱 실패: {e}")
+        return
+
+    if should_skip_image_generation():
+        finish_research_cycle(script_data)
+        return
+
     # 7. 이미지 로컬 합성
     with agent_step("Visual Agent", "이미지 생성 요청/카드 합성"):
         success = generate_card_news_images()
@@ -670,18 +678,9 @@ def run_orchestration_loop():
         write_human_summary()
         return
 
-    # 8. script.json 파싱
-    script_file = "script.json"
-    if not os.path.exists(script_file):
-        print("[Error] script.json 파일이 존재하지 않아 진행할 수 없습니다.")
-        return
-
-    try:
-        with open(script_file, "r", encoding="utf-8") as f:
-            script_data = json.load(f)
-        pages_count = len(script_data.get("pages", []))
-    except Exception as e:
-        print(f"[Error] script.json 파싱 실패: {e}")
+    if should_skip_drive_upload():
+        print("[Pipeline] SKIP_DRIVE_UPLOAD=true → Drive 임시 업로드와 SNS 발행을 건너뜁니다.")
+        finish_research_cycle(script_data)
         return
 
     # 9. 구글 드라이브 임시 호스팅
