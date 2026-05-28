@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ACCESS_TOKEN = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
-USER_ID = os.getenv("INSTAGRAM_ACCOUNT_ID", "")
+ACCESS_TOKEN = os.getenv("THREADS_ACCESS_TOKEN") or os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
+USER_ID = os.getenv("THREADS_USER_ID") or os.getenv("THREADS_ACCOUNT_ID") or os.getenv("INSTAGRAM_ACCOUNT_ID", "")
 API_BASE = "https://graph.threads.net/v1.0"
 LAST_REPORT_FILE = os.path.join("agent_runs", "threads_last_upload_report.json")
 
@@ -25,6 +25,21 @@ def _write_report(report: dict):
     os.makedirs("agent_runs", exist_ok=True)
     with open(LAST_REPORT_FILE, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
+
+
+def _masked(value: str) -> str:
+    if not value:
+        return "EMPTY"
+    if len(value) <= 10:
+        return f"set(length={len(value)})"
+    return f"{value[:6]}...{value[-4:]}(length={len(value)})"
+
+
+def debug_credentials():
+    token_source = "THREADS_ACCESS_TOKEN" if os.getenv("THREADS_ACCESS_TOKEN") else "INSTAGRAM_ACCESS_TOKEN"
+    user_source = "THREADS_USER_ID" if os.getenv("THREADS_USER_ID") else ("THREADS_ACCOUNT_ID" if os.getenv("THREADS_ACCOUNT_ID") else "INSTAGRAM_ACCOUNT_ID")
+    print(f"[Threads] token_source={token_source}, token={_masked(ACCESS_TOKEN)}")
+    print(f"[Threads] user_source={user_source}, user_id={_masked(USER_ID)}")
 
 
 def build_text_from_script(script_data: dict) -> str:
@@ -93,7 +108,9 @@ def publish_text_post(text: str) -> str | None:
     """외부 호출용 텍스트 전용 발행 함수."""
     if not ACCESS_TOKEN or not USER_ID:
         print("[Threads] ACCESS_TOKEN 또는 USER_ID 미설정 — 발행 건너뜀")
+        debug_credentials()
         return None
+    debug_credentials()
     return _publish_text(text)
 
 
@@ -116,6 +133,7 @@ def main(script_data: dict, image_url: str = None) -> bool:
     """
     if not ACCESS_TOKEN or not USER_ID:
         print("[Threads] ACCESS_TOKEN 또는 USER_ID 미설정 — 발행 건너뜀")
+        debug_credentials()
         return False
 
     report = {
@@ -128,6 +146,7 @@ def main(script_data: dict, image_url: str = None) -> bool:
     try:
         text = build_text_from_script(script_data)
         print("[Threads] 텍스트 포스트 발행 시도...")
+        debug_credentials()
         post_id = _publish_text(text)
 
         if post_id:
