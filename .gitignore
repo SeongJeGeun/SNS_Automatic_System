@@ -19,8 +19,9 @@ agent_runs/
 /logs/
 /shared/performance_log.json
 /shared/optimal_timing.json
-/jobs/active/
-/jobs/archive/
+/jobs/
+!/jobs/.gitkeep
+!/jobs/samples/
 /obsidian_vault/
 /launch_agents/
 daily_report.json
