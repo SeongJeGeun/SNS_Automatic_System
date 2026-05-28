@@ -1,10 +1,25 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "mind_factory_content_topics",
   "description": "External topic template pack for Mind Factory card-news generation.",
+  "series_system": {
+    "series_name": "마인드팩토리 10분 회복 시리즈",
+    "format": "7-page card news + Threads text",
+    "weekly_programming": {
+      "mon": "비교/불안",
+      "tue": "번아웃/회복",
+      "wed": "미루기/실행",
+      "thu": "외로움/자기회복",
+      "fri": "일/커리어 압박",
+      "sat": "관계/자존감",
+      "sun": "다음 주 루틴 설계"
+    },
+    "fixed_cta": "저장해두고 다음에 흔들리는 날 다시 꺼내 보세요.",
+    "next_episode_label": "다음 편 예고"
+  },
   "defaults": {
     "subtitle": "Mind Factory 자동 기획",
-    "structure": "pain hook -> cause reframe -> 3-step tips -> identity shift -> challenge CTA",
+    "structure": "pain hook -> cause reframe -> 3-step tips -> identity shift -> challenge CTA -> next episode tease",
     "caption_body": [
       "거창한 변화보다 지금 가능한 10분을 먼저 만드세요.",
       "저장해두고 흔들리는 날 다시 꺼내 보세요.",
@@ -15,6 +30,11 @@
     {
       "template_id": "small_routine_recovery",
       "topic_keys": ["execution_barrier", "routine_recovery"],
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "weekday_slot": "wed",
+      "episode_role": "시작 장벽을 낮추는 실행 편",
+      "next_episode_hint": "다음 편에서는 비교 불안이 올라올 때 앱을 닫고 내 속도로 돌아오는 방법을 다룹니다.",
+      "fixed_cta": "댓글에 '10분 시작'이라고 남기고 바로 하나만 실행하세요.",
       "title": "작은 루틴이 무너진 하루를 구한다",
       "pain_heading": "계속 미루고 자책하고 있나요?",
       "pain_sub": "불안한데 시작은 안 되고, 비교만 하다 하루가 끝나는 밤.",
@@ -35,6 +55,11 @@
     {
       "template_id": "comparison_detox",
       "topic_keys": ["comparison_anxiety"],
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "weekday_slot": "mon",
+      "episode_role": "비교 불안을 끊는 회복 편",
+      "next_episode_hint": "다음 편에서는 번아웃 직전의 하루를 10분 안에 재정렬하는 방법을 다룹니다.",
+      "fixed_cta": "댓글에 '비교 대신 10분'이라고 남기고 앱 하나를 닫아보세요.",
       "title": "비교가 심한 날 나를 다시 잡는 법",
       "pain_heading": "남들은 앞서가는데 나만 멈춘 것 같나요?",
       "pain_sub": "피곤한데도 쉬면 뒤처질까 불안해서 계속 자책하는 하루.",
@@ -55,6 +80,11 @@
     {
       "template_id": "burnout_reset",
       "topic_keys": ["burnout_recovery"],
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "weekday_slot": "tue",
+      "episode_role": "번아웃 회복 편",
+      "next_episode_hint": "다음 편에서는 시작 장벽을 낮추고 미루기를 끊는 10분 실행법을 다룹니다.",
+      "fixed_cta": "댓글에 '회복 10분'이라고 남기고 주변 한 곳만 정리하세요.",
       "title": "번아웃 직전의 하루를 회복하는 10분",
       "pain_heading": "쉬어도 피곤하고 시작도 두렵나요?",
       "pain_sub": "침대에 누워도 마음은 불안하고, 해야 할 일은 계속 쌓입니다.",
@@ -75,6 +105,11 @@
     {
       "template_id": "lonely_night_reset",
       "topic_keys": ["lonely_night_reset"],
+      "series_name": "마인드팩토리 10분 회복 시리즈",
+      "weekday_slot": "thu",
+      "episode_role": "혼자 무너지는 밤 회복 편",
+      "next_episode_hint": "다음 편에서는 일과 커리어 압박이 심한 날 다시 중심을 잡는 방법을 다룹니다.",
+      "fixed_cta": "댓글에 '내일로 넘김'이라고 남기고 오늘은 결론을 미루세요.",
       "title": "혼자 무너지는 밤을 넘기는 방법",
       "pain_heading": "밤만 되면 마음이 더 무거워지나요?",
       "pain_sub": "연락할 사람은 없고, 불안한 생각만 커지는 조용한 밤.",
