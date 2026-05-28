@@ -47,3 +47,4 @@ report_sent_*.txt
 # Local vector DB/cache
 faiss_index/
 .running.lock
+.venv/
