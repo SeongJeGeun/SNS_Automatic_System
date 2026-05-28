@@ -56,15 +56,15 @@ def build_quality_wrapper(app, eval_once):
     return wrapped_eval
 
 def main():
-    os.environ.setdefault("PIPELINE_INTERVAL_SECONDS", "10800")
-    os.environ.setdefault("RUN_MODE", "publish")
-    os.environ.setdefault("RAG_MODE", "search")
-    os.environ.setdefault("SKIP_IMAGE_GENERATION", "false")
-    os.environ.setdefault("SKIP_DRIVE_UPLOAD", "false")
-    os.environ.setdefault("SKIP_INSTAGRAM_PUBLISH", "false")
-    os.environ.setdefault("SKIP_THREADS_IMAGE_PUBLISH", "false")
-    os.environ.setdefault("MAX_QUALITY_RETRIES", "5")
-    os.environ.setdefault("MAX_STRATEGY_REANALYSIS", "1")
+    os.environ["PIPELINE_INTERVAL_SECONDS"] = os.getenv("PIPELINE_INTERVAL_SECONDS", "10800")
+    os.environ["RUN_MODE"] = "publish"
+    os.environ["RAG_MODE"] = os.getenv("RAG_MODE", "search")
+    os.environ["SKIP_IMAGE_GENERATION"] = "false"
+    os.environ["SKIP_DRIVE_UPLOAD"] = "false"
+    os.environ["SKIP_INSTAGRAM_PUBLISH"] = "false"
+    os.environ["SKIP_THREADS_IMAGE_PUBLISH"] = "false"
+    os.environ["MAX_QUALITY_RETRIES"] = os.getenv("MAX_QUALITY_RETRIES", "5")
+    os.environ["MAX_STRATEGY_REANALYSIS"] = os.getenv("MAX_STRATEGY_REANALYSIS", "1")
 
     import content_evaluator
     import main_orchestrator
@@ -76,6 +76,7 @@ def main():
 
     print("[Cycle Wrapper] 3시간 업로드 모드 실행")
     print("[Cycle Wrapper] 품질 재시도 + 트렌드/전략 재분석 fallback 활성화")
+    print("[Cycle Wrapper] RUN_MODE=publish, Instagram publish enabled, Threads text-only enabled")
     main_orchestrator.main()
 
 if __name__ == "__main__":
