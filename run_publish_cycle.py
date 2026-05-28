@@ -50,6 +50,26 @@ def build_quality_wrapper(app, eval_once):
     return wrapped_eval
 
 
+def install_unique_generator_wrapper(app):
+    import script_uniqueness_guard
+
+    original_run_generator = app.run_generator_script
+    max_attempts = int(os.getenv("MAX_SCRIPT_UNIQUENESS_RETRIES", "5"))
+
+    def unique_run_generator(diversify=False):
+        for attempt in range(1, max_attempts + 1):
+            original_run_generator(diversify=(diversify or attempt > 1))
+            if not script_uniqueness_guard.is_duplicate_script():
+                script_uniqueness_guard.record_script_history()
+                return True
+            print(f"[Script Guard] duplicate script detected; regenerating {attempt}/{max_attempts}")
+        print("[Script Guard] duplicate remained after retry limit; recording for audit")
+        script_uniqueness_guard.record_script_history()
+        return False
+
+    app.run_generator_script = unique_run_generator
+
+
 def _interval_seconds():
     return int(os.getenv("PIPELINE_INTERVAL_SECONDS", "10800"))
 
@@ -87,6 +107,7 @@ def main():
     import content_evaluator
     import main_orchestrator
 
+    install_unique_generator_wrapper(main_orchestrator)
     main_orchestrator.evaluate_script_quality = build_quality_wrapper(
         main_orchestrator,
         content_evaluator.evaluate_script_quality,
@@ -95,6 +116,7 @@ def main():
     _patch_pipeline_interval(main_orchestrator, "starting")
     print("[Cycle Wrapper] 3 hour publish mode enabled")
     print("[Cycle Wrapper] RUN_ONCE=true; launchd owns the 3 hour schedule")
+    print("[Cycle Wrapper] script uniqueness guard enabled")
     main_orchestrator.run_orchestration_loop()
     _patch_pipeline_interval(main_orchestrator, "waiting")
 
