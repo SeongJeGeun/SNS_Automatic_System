@@ -4,8 +4,8 @@ Reads current runtime artifacts, asks the local LLM for a short operating
 recommendation, and writes report files only. It does not publish anything and
 does not modify the existing pipeline.
 
-Batch step 2 adds a lightweight topic guidance artifact that generator.py may
-optionally read in a later stage.
+CEO topic candidates are loaded from templates/ceo_topic_pool.json so the topic
+pool can evolve without code changes.
 """
 
 from __future__ import annotations
@@ -21,33 +21,32 @@ from local_llm_router import LocalLLMRouter
 REPORT_JSON = os.path.join("agent_runs", "ceo_cycle_report.json")
 REPORT_MD = os.path.join("agent_runs", "ceo_cycle_report.md")
 TOPIC_GUIDANCE_JSON = os.path.join("agent_runs", "ceo_topic_guidance.json")
+CEO_TOPIC_POOL_FILE = os.getenv("CEO_TOPIC_POOL_FILE", os.path.join("templates", "ceo_topic_pool.json"))
 
-TOPIC_POOL = [
-    {
-        "topic_key": "comparison_anxiety",
-        "topic_title": "비교 불안에서 벗어나는 작은 루틴",
-        "emotion_axis": "비교/불안",
-        "avoid_after": ["comparison_detox"],
+FALLBACK_TOPIC_POOL = {
+    "version": 0,
+    "name": "fallback_ceo_topic_pool",
+    "selection_policy": {
+        "recent_history_limit": 5,
+        "mode": "avoid_recent_template_ids_first",
     },
-    {
-        "topic_key": "burnout_recovery",
-        "topic_title": "번아웃 직전의 하루를 회복하는 10분",
-        "emotion_axis": "번아웃/회복",
-        "avoid_after": ["burnout_reset"],
-    },
-    {
-        "topic_key": "execution_barrier",
-        "topic_title": "시작 장벽을 낮추는 10분 실행법",
-        "emotion_axis": "미루기/실행",
-        "avoid_after": ["small_routine_recovery"],
-    },
-    {
-        "topic_key": "lonely_night_reset",
-        "topic_title": "혼자 무너지는 밤을 넘기는 방법",
-        "emotion_axis": "외로움/자기회복",
-        "avoid_after": [],
-    },
-]
+    "topics": [
+        {
+            "topic_key": "comparison_anxiety",
+            "topic_title": "비교 불안에서 벗어나는 작은 루틴",
+            "emotion_axis": "비교/불안",
+            "avoid_after": ["comparison_detox"],
+            "why_now": "비교와 뒤처짐 불안을 작은 루틴으로 전환",
+        },
+        {
+            "topic_key": "execution_barrier",
+            "topic_title": "시작 장벽을 낮추는 10분 실행법",
+            "emotion_axis": "미루기/실행",
+            "avoid_after": ["small_routine_recovery"],
+            "why_now": "미루기와 자책을 시작 설계 문제로 재정의",
+        },
+    ],
+}
 
 
 def _load_json(path: str, default: Any):
@@ -80,6 +79,7 @@ def _write_markdown(path: str, report: Dict[str, Any]) -> None:
         f"- threads_state: {report.get('state', {}).get('threads_state')}",
         f"- recent_topic: {report.get('state', {}).get('recent_topic')}",
         f"- next_topic: {topic.get('topic_title')}",
+        f"- emotion_axis: {topic.get('emotion_axis')}",
         "",
         "## CEO Recommendation",
         "",
@@ -88,6 +88,19 @@ def _write_markdown(path: str, report: Dict[str, Any]) -> None:
     ]
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+def _load_topic_pool() -> Dict[str, Any]:
+    pool = _load_json(CEO_TOPIC_POOL_FILE, None)
+    if isinstance(pool, dict) and isinstance(pool.get("topics"), list) and pool["topics"]:
+        return pool
+    print(f"[CEO Draft] topic pool missing or invalid, fallback used: {CEO_TOPIC_POOL_FILE}")
+    return FALLBACK_TOPIC_POOL
+
+
+def _topic_candidates(pool: Dict[str, Any]) -> List[Dict[str, Any]]:
+    topics = pool.get("topics") if isinstance(pool, dict) else []
+    return topics if isinstance(topics, list) and topics else FALLBACK_TOPIC_POOL["topics"]
 
 
 def _recent_template_ids(history: Any, limit: int = 5) -> List[str]:
@@ -102,26 +115,41 @@ def _recent_template_ids(history: Any, limit: int = 5) -> List[str]:
     return result
 
 
-def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
-    history = state.get("script_history", [])
-    recent_template_ids = set(_recent_template_ids(history, limit=5))
+def _history_limit(pool: Dict[str, Any]) -> int:
+    policy = pool.get("selection_policy") if isinstance(pool, dict) else {}
+    if not isinstance(policy, dict):
+        return 5
+    try:
+        return int(policy.get("recent_history_limit", 5))
+    except Exception:
+        return 5
 
-    for item in TOPIC_POOL:
+
+def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
+    pool = _load_topic_pool()
+    history = state.get("script_history", [])
+    recent_template_ids = set(_recent_template_ids(history, limit=_history_limit(pool)))
+    topics = _topic_candidates(pool)
+
+    for item in topics:
         if not any(blocked in recent_template_ids for blocked in item.get("avoid_after", [])):
             chosen = item
             break
     else:
-        chosen = TOPIC_POOL[0]
+        chosen = topics[0]
 
     return {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": "ceo_cycle_draft",
         "mode": "advisory",
+        "topic_pool_file": CEO_TOPIC_POOL_FILE,
+        "topic_pool_name": pool.get("name"),
         "topic_key": chosen["topic_key"],
         "topic_title": chosen["topic_title"],
         "emotion_axis": chosen["emotion_axis"],
+        "why_now": chosen.get("why_now"),
         "avoid_recent_template_ids": list(recent_template_ids),
-        "notes": "Advisory only. Generator may read this file in a later stage.",
+        "notes": "Advisory only. Generator reads this file and falls back if unavailable.",
     }
 
 
