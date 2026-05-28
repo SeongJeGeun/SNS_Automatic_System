@@ -89,30 +89,48 @@ def main():
     apply_performance_to_strategy()
 
 
+def new_skip_stats():
+    return {
+        "invalid_targets": 0,
+        "invalid_values": set(),
+        "duplicate_cross_platform": 0,
+        "duplicate_ids": set(),
+    }
+
+
 def collect_targets(gsm):
     targets = []
     seen_pairs = set()
     seen_post_ids = set()
+    skip_stats = new_skip_stats()
 
     if gsm and gsm.sheet:
         try:
             for record in gsm.sheet.get_all_records():
-                for target in targets_from_sheet_record(record):
-                    add_target(targets, seen_pairs, seen_post_ids, target["platform"], target["post_id"])
+                for target in targets_from_sheet_record(record, skip_stats=skip_stats):
+                    add_target(
+                        targets,
+                        seen_pairs,
+                        seen_post_ids,
+                        target["platform"],
+                        target["post_id"],
+                        skip_stats=skip_stats,
+                    )
         except Exception as e:
             print(f"[Warning] Existing Google Sheet records read failed: {e}")
 
     for platform, post_id in targets_from_local_reports():
-        add_target(targets, seen_pairs, seen_post_ids, platform, post_id)
+        add_target(targets, seen_pairs, seen_post_ids, platform, post_id, skip_stats=skip_stats)
 
     if not any(target["platform"] == "threads" for target in targets):
         for post_id in get_threads_post_ids(limit=10):
-            add_target(targets, seen_pairs, seen_post_ids, "threads", post_id)
+            add_target(targets, seen_pairs, seen_post_ids, "threads", post_id, skip_stats=skip_stats)
 
+    print_skip_summary(skip_stats)
     return targets
 
 
-def targets_from_sheet_record(record):
+def targets_from_sheet_record(record, skip_stats=None):
     targets = []
     platform = normalize_platform(record.get("platform") or record.get("플랫폼"))
     post_id = (
@@ -128,7 +146,7 @@ def targets_from_sheet_record(record):
             "post_id": str(post_id).strip(),
         })
     elif post_id:
-        print(f"   [Info] invalid metric target skipped: {post_id}")
+        note_invalid_target(skip_stats, post_id)
 
     instagram_id = record.get("instagram_post_id") or record.get("instagram_media_id")
     if is_valid_post_id(instagram_id):
@@ -156,7 +174,7 @@ def targets_from_local_reports():
     return targets
 
 
-def add_target(targets, seen_pairs, seen_post_ids, platform, post_id):
+def add_target(targets, seen_pairs, seen_post_ids, platform, post_id, skip_stats=None):
     platform = normalize_platform(platform)
     post_id = str(post_id or "").strip()
     if not platform or not is_valid_post_id(post_id):
@@ -167,12 +185,47 @@ def add_target(targets, seen_pairs, seen_post_ids, platform, post_id):
         return
 
     if post_id in seen_post_ids:
-        print(f"   [Info] duplicate metric id skipped across platforms: {post_id} ({platform})")
+        note_duplicate_target(skip_stats, post_id)
         return
 
     seen_pairs.add(key)
     seen_post_ids.add(post_id)
     targets.append({"platform": platform, "post_id": post_id})
+
+
+def note_invalid_target(skip_stats, value):
+    if skip_stats is None:
+        print(f"   [Info] invalid metric target skipped: {value}")
+        return
+    skip_stats["invalid_targets"] += 1
+    if value:
+        skip_stats["invalid_values"].add(str(value))
+
+
+def note_duplicate_target(skip_stats, post_id):
+    if skip_stats is None:
+        print(f"   [Info] duplicate metric id skipped across platforms: {post_id}")
+        return
+    skip_stats["duplicate_cross_platform"] += 1
+    if post_id:
+        skip_stats["duplicate_ids"].add(str(post_id))
+
+
+def print_skip_summary(skip_stats):
+    if not skip_stats:
+        return
+    if skip_stats.get("invalid_targets"):
+        sample = ", ".join(sorted(skip_stats.get("invalid_values", set()))[:3]) or "none"
+        print(
+            "   [Info] invalid metric targets skipped: "
+            f"{skip_stats['invalid_targets']} rows (sample: {sample})"
+        )
+    if skip_stats.get("duplicate_cross_platform"):
+        sample = ", ".join(sorted(skip_stats.get("duplicate_ids", set()))[:3]) or "none"
+        print(
+            "   [Info] duplicate metric ids skipped across platforms: "
+            f"{skip_stats['duplicate_cross_platform']} rows (sample: {sample})"
+        )
 
 
 def build_instagram_row(post_id):
