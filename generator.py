@@ -118,8 +118,8 @@ def _topic_templates(pack):
     return templates if isinstance(templates, list) and templates else FALLBACK_TEMPLATE_PACK["templates"]
 
 
-def _page(page, role, heading, sub_text, image_prompt, layout_hint):
-    return {
+def _page(page, role, heading, sub_text, image_prompt, layout_hint, **extra):
+    payload = {
         "page": page,
         "role": role,
         "heading": _clean_sentence(heading, 32),
@@ -127,6 +127,8 @@ def _page(page, role, heading, sub_text, image_prompt, layout_hint):
         "image_prompt": image_prompt,
         "layout_hint": layout_hint,
     }
+    payload.update({k: v for k, v in extra.items() if v not in (None, "")})
+    return payload
 
 
 def _load_ceo_topic_guidance():
@@ -166,25 +168,6 @@ def _select_template(pack, strategy, audience, diversify):
     return rng.choice(templates), guidance
 
 
-def _build_pages(template):
-    return [
-        _page(1, "pain_hook", template["pain_heading"], template["pain_sub"], "dark phone glow, tired young adult, anxiety mood, Korean Instagram headline space", "large bottom headline with small top label"),
-        _page(2, "cause_reframe", template["reframe_heading"], template["reframe_sub"], "minimal desk, scattered notes, broken routine symbols, muted blue gray tone", "split layout: problem label left, explanation box right"),
-        _page(3, "three_step_tip_1", template["tip_heading"], template["tip_sub"], "three numbered cards, water glass, phone off icon, pen and notebook, clean contrast", "three stacked tip boxes with big numbers"),
-        _page(4, "three_step_tip_2", template["summary_heading"], template["summary_sub"], "walking shoes at door, simple checklist, warm light, recovery and routine mood", "summary card with checklist bullets"),
-        _page(5, "identity_shift", template["identity_heading"], template["identity_sub"], "open window, calm morning light, notebook with routine grid, hopeful mood", "quote-centered layout with subtle frame"),
-        _page(6, "micro_action", template["action_heading"], template["action_sub"], "bold checklist template, pen tick mark, minimal black and cream Instagram design", "template style with blank line for user action"),
-        _page(7, "save_cta", template["cta_heading"], template["cta_sub"], "challenge completion card, stamp icon, save reminder, strong CTA, Korean social media post", "final CTA card with save icon and comment prompt"),
-    ]
-
-
-def _caption_body(defaults):
-    body = defaults.get("caption_body") if isinstance(defaults, dict) else []
-    if isinstance(body, list) and body:
-        return "\n".join(_as_text(line) for line in body)
-    return "거창한 변화보다 지금 가능한 10분을 먼저 만드세요.\n저장해두고 흔들리는 날 다시 꺼내 보세요."
-
-
 def _series_metadata(pack, template):
     series = _series_system(pack)
     return {
@@ -195,6 +178,42 @@ def _series_metadata(pack, template):
         "fixed_cta": _as_text(template.get("fixed_cta"), _as_text(series.get("fixed_cta"), "")),
         "next_episode_label": _as_text(series.get("next_episode_label"), "다음 편 예고"),
     }
+
+
+def _build_pages(template, series_meta=None):
+    series_meta = series_meta or {}
+    series_badge = series_meta.get("series_name")
+    episode_role = series_meta.get("episode_role")
+    next_episode_hint = series_meta.get("next_episode_hint")
+    fixed_cta = series_meta.get("fixed_cta")
+    next_label = series_meta.get("next_episode_label", "다음 편 예고")
+
+    page1_sub = template["pain_sub"]
+    if episode_role:
+        page1_sub = f"{episode_role} · {template['pain_sub']}"
+
+    page7_sub = template["cta_sub"]
+    if fixed_cta:
+        page7_sub = fixed_cta
+    if next_episode_hint:
+        page7_sub = f"{page7_sub} / {next_label}: {next_episode_hint}"
+
+    return [
+        _page(1, "pain_hook", template["pain_heading"], page1_sub, "dark phone glow, tired young adult, anxiety mood, Korean Instagram headline space, small series badge at top", "series badge top, large bottom headline with small top label", series_badge=series_badge, episode_role=episode_role),
+        _page(2, "cause_reframe", template["reframe_heading"], template["reframe_sub"], "minimal desk, scattered notes, broken routine symbols, muted blue gray tone", "split layout: problem label left, explanation box right"),
+        _page(3, "three_step_tip_1", template["tip_heading"], template["tip_sub"], "three numbered cards, water glass, phone off icon, pen and notebook, clean contrast", "three stacked tip boxes with big numbers"),
+        _page(4, "three_step_tip_2", template["summary_heading"], template["summary_sub"], "walking shoes at door, simple checklist, warm light, recovery and routine mood", "summary card with checklist bullets"),
+        _page(5, "identity_shift", template["identity_heading"], template["identity_sub"], "open window, calm morning light, notebook with routine grid, hopeful mood", "quote-centered layout with subtle frame"),
+        _page(6, "micro_action", template["action_heading"], template["action_sub"], "bold checklist template, pen tick mark, minimal black and cream Instagram design", "template style with blank line for user action"),
+        _page(7, "save_cta", template["cta_heading"], page7_sub, "challenge completion card, stamp icon, save reminder, strong CTA, Korean social media post, next episode teaser", "final CTA card with save icon, comment prompt, and next episode teaser", series_badge=series_badge, next_episode_hint=next_episode_hint, fixed_cta=fixed_cta),
+    ]
+
+
+def _caption_body(defaults):
+    body = defaults.get("caption_body") if isinstance(defaults, dict) else []
+    if isinstance(body, list) and body:
+        return "\n".join(_as_text(line) for line in body)
+    return "거창한 변화보다 지금 가능한 10분을 먼저 만드세요.\n저장해두고 흔들리는 날 다시 꺼내 보세요."
 
 
 def _series_caption_block(meta):
@@ -231,10 +250,10 @@ def generate_script(diversify=False):
     if healing:
         title = template["title"]
 
-    pages = _build_pages(template)
+    series_meta = _series_metadata(pack, template)
+    pages = _build_pages(template, series_meta)
     structure = defaults.get("structure", FALLBACK_TEMPLATE_PACK["defaults"]["structure"])
     subtitle = defaults.get("subtitle", "Mind Factory 자동 기획")
-    series_meta = _series_metadata(pack, template)
     series_caption = _series_caption_block(series_meta)
 
     script = {
