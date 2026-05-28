@@ -154,6 +154,18 @@ def ensure_script_alignment(app):
     return report
 
 
+def record_decision_memory():
+    if os.getenv("ENABLE_DECISION_MEMORY", "true").lower() != "true":
+        print("[Decision Memory] disabled")
+        return False
+    try:
+        import decision_memory
+        return decision_memory.record_publish_cycle_memory()
+    except Exception as exc:
+        print(f"[Decision Memory] skipped: {exc}")
+        return False
+
+
 def _interval_seconds():
     return int(os.getenv("PIPELINE_INTERVAL_SECONDS", "10800"))
 
@@ -207,7 +219,9 @@ def main():
     print("[Cycle Wrapper] CEO topic guidance preflight enabled")
     print("[Cycle Wrapper] script alignment guard enabled")
     print("[Cycle Wrapper] template pack validation enabled")
+    print("[Cycle Wrapper] decision memory enabled")
     main_orchestrator.run_orchestration_loop()
+    record_decision_memory()
     _patch_pipeline_interval(main_orchestrator, "waiting")
 
 
