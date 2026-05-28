@@ -5,7 +5,8 @@ recommendation, and writes report files only. It does not publish anything and
 does not modify the existing pipeline.
 
 CEO topic candidates are loaded from templates/ceo_topic_pool.json so the topic
-pool can evolve without code changes.
+pool can evolve without code changes. The CEO now prefers the configured
+weekday_slot when selection_policy.prefer_weekday_slot=true.
 """
 
 from __future__ import annotations
@@ -29,12 +30,14 @@ FALLBACK_TOPIC_POOL = {
     "selection_policy": {
         "recent_history_limit": 5,
         "mode": "avoid_recent_template_ids_first",
+        "prefer_weekday_slot": True,
     },
     "topics": [
         {
             "topic_key": "comparison_anxiety",
             "topic_title": "비교 불안에서 벗어나는 작은 루틴",
             "emotion_axis": "비교/불안",
+            "weekday_slot": "mon",
             "avoid_after": ["comparison_detox"],
             "why_now": "비교와 뒤처짐 불안을 작은 루틴으로 전환",
         },
@@ -42,11 +45,14 @@ FALLBACK_TOPIC_POOL = {
             "topic_key": "execution_barrier",
             "topic_title": "시작 장벽을 낮추는 10분 실행법",
             "emotion_axis": "미루기/실행",
+            "weekday_slot": "wed",
             "avoid_after": ["small_routine_recovery"],
             "why_now": "미루기와 자책을 시작 설계 문제로 재정의",
         },
     ],
 }
+
+WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 def _load_json(path: str, default: Any):
@@ -80,6 +86,8 @@ def _write_markdown(path: str, report: Dict[str, Any]) -> None:
         f"- recent_topic: {report.get('state', {}).get('recent_topic')}",
         f"- next_topic: {topic.get('topic_title')}",
         f"- emotion_axis: {topic.get('emotion_axis')}",
+        f"- weekday_slot: {topic.get('weekday_slot')}",
+        f"- selected_by: {topic.get('selected_by')}",
         "",
         "## CEO Recommendation",
         "",
@@ -125,18 +133,46 @@ def _history_limit(pool: Dict[str, Any]) -> int:
         return 5
 
 
+def _prefer_weekday_slot(pool: Dict[str, Any]) -> bool:
+    policy = pool.get("selection_policy") if isinstance(pool, dict) else {}
+    if not isinstance(policy, dict):
+        return False
+    return str(policy.get("prefer_weekday_slot", "false")).lower() == "true"
+
+
+def _today_weekday_slot() -> str:
+    override = os.getenv("CEO_WEEKDAY_SLOT", "").strip().lower()
+    if override in WEEKDAY_KEYS:
+        return override
+    return WEEKDAY_KEYS[datetime.now().weekday()]
+
+
+def _is_allowed_by_history(topic: Dict[str, Any], recent_template_ids: set) -> bool:
+    return not any(blocked in recent_template_ids for blocked in topic.get("avoid_after", []))
+
+
+def _select_topic(topics: List[Dict[str, Any]], recent_template_ids: set, pool: Dict[str, Any]) -> tuple[Dict[str, Any], str, str]:
+    today_slot = _today_weekday_slot()
+    weekday_topics = [topic for topic in topics if topic.get("weekday_slot") == today_slot]
+
+    if _prefer_weekday_slot(pool) and weekday_topics:
+        for topic in weekday_topics:
+            if _is_allowed_by_history(topic, recent_template_ids):
+                return topic, "weekday_slot", today_slot
+        return weekday_topics[0], "weekday_slot_history_override", today_slot
+
+    for topic in topics:
+        if _is_allowed_by_history(topic, recent_template_ids):
+            return topic, "avoid_recent_template_ids", today_slot
+    return topics[0], "fallback_first_topic", today_slot
+
+
 def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
     pool = _load_topic_pool()
     history = state.get("script_history", [])
     recent_template_ids = set(_recent_template_ids(history, limit=_history_limit(pool)))
     topics = _topic_candidates(pool)
-
-    for item in topics:
-        if not any(blocked in recent_template_ids for blocked in item.get("avoid_after", [])):
-            chosen = item
-            break
-    else:
-        chosen = topics[0]
+    chosen, selected_by, today_slot = _select_topic(topics, recent_template_ids, pool)
 
     return {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -147,6 +183,12 @@ def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
         "topic_key": chosen["topic_key"],
         "topic_title": chosen["topic_title"],
         "emotion_axis": chosen["emotion_axis"],
+        "weekday_slot": chosen.get("weekday_slot"),
+        "today_weekday_slot": today_slot,
+        "selected_by": selected_by,
+        "series_name": chosen.get("series_name"),
+        "episode_role": chosen.get("episode_role"),
+        "next_episode_hint": chosen.get("next_episode_hint"),
         "why_now": chosen.get("why_now"),
         "avoid_recent_template_ids": list(recent_template_ids),
         "notes": "Advisory only. Generator reads this file and falls back if unavailable.",
@@ -181,6 +223,7 @@ def collect_runtime_state() -> Dict[str, Any]:
         "performance_count": len(performance) if isinstance(performance, list) else 0,
         "instagram_state": instagram_state,
         "threads_state": threads_state,
+        "today_weekday_slot": _today_weekday_slot(),
     }
 
 
@@ -207,7 +250,8 @@ class CEORecommendationWorker:
         system = (
             "당신은 1인 AI 기업 운영 CEO 에이전트입니다. "
             "로컬 LLM만 사용하며, SNS 자동화 시스템의 다음 회차 전략을 짧고 실행 가능하게 제안합니다. "
-            "중복 콘텐츠를 피하고 Instagram 쿨다운 중에는 Threads 중심으로 운영합니다."
+            "중복 콘텐츠를 피하고 Instagram 쿨다운 중에는 Threads 중심으로 운영합니다. "
+            "요일별 시리즈 편성표가 있으면 그 편성을 우선합니다."
         )
         user = (
             "현재 런타임 상태와 다음 주제 후보를 보고 다음 회차 운영 판단을 내려주세요.\n"
@@ -225,6 +269,7 @@ class CEORecommendationWorker:
             )
         fallback = (
             f"다음 회차는 '{topic_guidance['topic_title']}' 주제로 전환하세요.\n"
+            f"선정 기준: {topic_guidance.get('selected_by')} / 요일 슬롯: {topic_guidance.get('today_weekday_slot')}\n"
             "Instagram은 쿨다운 여부를 우선 확인하고, 제한 중이면 Threads만 발행하세요.\n"
             "성과 데이터가 부족하므로 조회수보다 중복 방지와 발행 안정성을 우선하세요."
         )
