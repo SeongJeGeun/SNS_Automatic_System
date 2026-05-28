@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional
 
 try:
     from openai import OpenAI
@@ -26,6 +26,8 @@ class LocalLLMResult:
     model: str
     content: str
     error: Optional[str] = None
+    task_type: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
 
 
 class LocalLLMRouter:
@@ -49,7 +51,15 @@ class LocalLLMRouter:
         user: str,
         temperature: float = 0.3,
         max_tokens: Optional[int] = 1200,
+        task_type: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
     ) -> LocalLLMResult:
+        """Call the configured local OpenAI-compatible chat endpoint.
+
+        task_type and metadata are accepted for agent tracing. They do not alter
+        provider behavior, but they prevent caller/adapter drift as the CEO
+        workflow grows.
+        """
         try:
             response = self._client().chat.completions.create(
                 model=self.model,
@@ -66,6 +76,8 @@ class LocalLLMRouter:
                 provider=self.provider,
                 model=self.model,
                 content=content.strip(),
+                task_type=task_type,
+                metadata=metadata,
             )
         except Exception as exc:
             return LocalLLMResult(
@@ -74,6 +86,8 @@ class LocalLLMRouter:
                 model=self.model,
                 content="",
                 error=str(exc),
+                task_type=task_type,
+                metadata=metadata,
             )
 
     def is_configured(self) -> bool:
