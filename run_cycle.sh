@@ -71,7 +71,7 @@ echo "[6/7] Run main orchestrator"
 python3 main_orchestrator.py
 
 echo "[7/7] Commit safe tracked output changes if any"
-git add README.md docs .env.example *.py run_cycle.sh 2>/dev/null || true
+git add README.md docs .env.example run_cycle.sh scripts/install_launchd.sh 2>/dev/null || true
 
 if [ -n "$(git status --porcelain)" ]; then
   git commit -m "chore: update automation outputs"
