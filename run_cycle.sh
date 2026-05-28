@@ -10,13 +10,15 @@ LOG_FILE="$LOG_DIR/run_cycle.log"
 mkdir -p "$LOG_DIR"
 cd "$PROJECT_DIR"
 
-exec >> "$LOG_FILE" 2>&1
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo ""
 echo "============================================================"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] SNS automation cycle started"
 echo "Project: $PROJECT_DIR"
 echo "Branch: $BRANCH"
+echo "RUN_MODE=${RUN_MODE:-research}"
+echo "RAG_MODE=${RAG_MODE:-search}"
 
 if [ -f "$LOCK_FILE" ]; then
   echo "Another cycle is already running. Skip this run."
@@ -65,10 +67,17 @@ else
 fi
 
 echo "[5/7] Sync Python dependencies"
-python3 -m pip install -r requirements.txt
+PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install -q -r requirements.txt
 
 echo "[6/7] Run main orchestrator"
-python3 main_orchestrator.py
+export RUN_MODE="${RUN_MODE:-research}"
+export RAG_MODE="${RAG_MODE:-search}"
+export SKIP_IMAGE_GENERATION="${SKIP_IMAGE_GENERATION:-true}"
+export SKIP_DRIVE_UPLOAD="${SKIP_DRIVE_UPLOAD:-true}"
+export SKIP_INSTAGRAM_PUBLISH="${SKIP_INSTAGRAM_PUBLISH:-true}"
+export SKIP_THREADS_IMAGE_PUBLISH="${SKIP_THREADS_IMAGE_PUBLISH:-true}"
+export PYTHONUNBUFFERED=1
+python3 -u main_orchestrator.py
 
 echo "[7/7] Commit safe tracked output changes if any"
 git add README.md docs .env.example run_cycle.sh scripts/install_launchd.sh 2>/dev/null || true
