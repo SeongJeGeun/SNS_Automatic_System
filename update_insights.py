@@ -91,22 +91,23 @@ def main():
 
 def collect_targets(gsm):
     targets = []
-    seen = set()
+    seen_pairs = set()
+    seen_post_ids = set()
 
     if gsm and gsm.sheet:
         try:
             for record in gsm.sheet.get_all_records():
                 for target in targets_from_sheet_record(record):
-                    add_target(targets, seen, target["platform"], target["post_id"])
+                    add_target(targets, seen_pairs, seen_post_ids, target["platform"], target["post_id"])
         except Exception as e:
             print(f"[Warning] Existing Google Sheet records read failed: {e}")
 
     for platform, post_id in targets_from_local_reports():
-        add_target(targets, seen, platform, post_id)
+        add_target(targets, seen_pairs, seen_post_ids, platform, post_id)
 
     if not any(target["platform"] == "threads" for target in targets):
         for post_id in get_threads_post_ids(limit=10):
-            add_target(targets, seen, "threads", post_id)
+            add_target(targets, seen_pairs, seen_post_ids, "threads", post_id)
 
     return targets
 
@@ -155,17 +156,22 @@ def targets_from_local_reports():
     return targets
 
 
-def add_target(targets, seen, platform, post_id):
+def add_target(targets, seen_pairs, seen_post_ids, platform, post_id):
     platform = normalize_platform(platform)
     post_id = str(post_id or "").strip()
     if not platform or not is_valid_post_id(post_id):
         return
 
     key = (platform, post_id)
-    if key in seen:
+    if key in seen_pairs:
         return
 
-    seen.add(key)
+    if post_id in seen_post_ids:
+        print(f"   [Info] duplicate metric id skipped across platforms: {post_id} ({platform})")
+        return
+
+    seen_pairs.add(key)
+    seen_post_ids.add(post_id)
     targets.append({"platform": platform, "post_id": post_id})
 
 
