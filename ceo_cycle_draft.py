@@ -5,8 +5,9 @@ recommendation, and writes report files only. It does not publish anything and
 does not modify the existing pipeline.
 
 CEO topic candidates are loaded from templates/ceo_topic_pool.json so the topic
-pool can evolve without code changes. The CEO now prefers the configured
-weekday_slot when selection_policy.prefer_weekday_slot=true.
+pool can evolve without code changes. The CEO prefers the configured
+weekday_slot when selection_policy.prefer_weekday_slot=true and now also uses
+recent decision_memory.jsonl events to avoid repeating weak patterns.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set, Tuple
 
 from agent_core import AgentResult, AgentTask, CEOAgent
 from local_llm_router import LocalLLMRouter
@@ -23,6 +24,7 @@ REPORT_JSON = os.path.join("agent_runs", "ceo_cycle_report.json")
 REPORT_MD = os.path.join("agent_runs", "ceo_cycle_report.md")
 TOPIC_GUIDANCE_JSON = os.path.join("agent_runs", "ceo_topic_guidance.json")
 CEO_TOPIC_POOL_FILE = os.getenv("CEO_TOPIC_POOL_FILE", os.path.join("templates", "ceo_topic_pool.json"))
+DECISION_MEMORY_FILE = os.getenv("DECISION_MEMORY_FILE", os.path.join("agent_runs", "decision_memory.jsonl"))
 
 FALLBACK_TOPIC_POOL = {
     "version": 0,
@@ -75,6 +77,7 @@ def _write_json(path: str, data: Dict[str, Any]) -> None:
 def _write_markdown(path: str, report: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     topic = report.get("topic_guidance", {})
+    memory = topic.get("memory_signal", {}) if isinstance(topic, dict) else {}
     lines = [
         "# CEO Cycle Dry-run Report",
         "",
@@ -88,6 +91,8 @@ def _write_markdown(path: str, report: Dict[str, Any]) -> None:
         f"- emotion_axis: {topic.get('emotion_axis')}",
         f"- weekday_slot: {topic.get('weekday_slot')}",
         f"- selected_by: {topic.get('selected_by')}",
+        f"- memory_recent_templates: {memory.get('recent_template_ids')}",
+        f"- memory_recent_emotions: {memory.get('recent_emotion_axes')}",
         "",
         "## CEO Recommendation",
         "",
@@ -123,6 +128,73 @@ def _recent_template_ids(history: Any, limit: int = 5) -> List[str]:
     return result
 
 
+def _load_recent_decisions(limit: int = 10) -> List[Dict[str, Any]]:
+    try:
+        from decision_memory import load_recent_decisions
+        return load_recent_decisions(limit=limit, memory_file=DECISION_MEMORY_FILE)
+    except Exception:
+        pass
+
+    if not os.path.exists(DECISION_MEMORY_FILE):
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        with open(DECISION_MEMORY_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return rows[-limit:]
+
+
+def _decision_memory_signal(decisions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    recent_template_ids: List[str] = []
+    recent_emotion_axes: List[str] = []
+    weak_template_ids: Set[str] = set()
+    weak_emotion_axes: Set[str] = set()
+    alignment_failed_topics: List[str] = []
+
+    for event in decisions:
+        topic = event.get("topic") if isinstance(event, dict) else {}
+        quality = event.get("quality") if isinstance(event, dict) else {}
+        guards = event.get("guards") if isinstance(event, dict) else {}
+        if not isinstance(topic, dict):
+            topic = {}
+        if not isinstance(quality, dict):
+            quality = {}
+        if not isinstance(guards, dict):
+            guards = {}
+
+        template_id = topic.get("template_id")
+        emotion_axis = topic.get("ceo_emotion_axis")
+        if template_id:
+            recent_template_ids.append(str(template_id))
+        if emotion_axis:
+            recent_emotion_axes.append(str(emotion_axis))
+
+        alignment = guards.get("script_alignment") if isinstance(guards.get("script_alignment"), dict) else {}
+        quality_ok = quality.get("ok")
+        if alignment.get("ok") is False or quality_ok is False:
+            if template_id:
+                weak_template_ids.add(str(template_id))
+            if emotion_axis:
+                weak_emotion_axes.add(str(emotion_axis))
+            if topic.get("title"):
+                alignment_failed_topics.append(str(topic.get("title")))
+
+    return {
+        "recent_template_ids": recent_template_ids[-5:],
+        "recent_emotion_axes": recent_emotion_axes[-5:],
+        "weak_template_ids": sorted(weak_template_ids),
+        "weak_emotion_axes": sorted(weak_emotion_axes),
+        "alignment_failed_topics": alignment_failed_topics[-3:],
+        "decision_count": len(decisions),
+    }
+
+
 def _history_limit(pool: Dict[str, Any]) -> int:
     policy = pool.get("selection_policy") if isinstance(pool, dict) else {}
     if not isinstance(policy, dict):
@@ -151,28 +223,71 @@ def _is_allowed_by_history(topic: Dict[str, Any], recent_template_ids: set) -> b
     return not any(blocked in recent_template_ids for blocked in topic.get("avoid_after", []))
 
 
-def _select_topic(topics: List[Dict[str, Any]], recent_template_ids: set, pool: Dict[str, Any]) -> tuple[Dict[str, Any], str, str]:
+def _memory_risk(topic: Dict[str, Any], memory_signal: Dict[str, Any]) -> int:
+    risk = 0
+    avoid_after = set(str(x) for x in topic.get("avoid_after", []))
+    recent_templates = set(memory_signal.get("recent_template_ids", []))
+    weak_templates = set(memory_signal.get("weak_template_ids", []))
+    recent_emotions = set(memory_signal.get("recent_emotion_axes", []))
+    weak_emotions = set(memory_signal.get("weak_emotion_axes", []))
+    emotion_axis = str(topic.get("emotion_axis", ""))
+
+    if avoid_after & recent_templates:
+        risk += 5
+    if avoid_after & weak_templates:
+        risk += 4
+    if emotion_axis and emotion_axis in weak_emotions:
+        risk += 3
+    if emotion_axis and emotion_axis in recent_emotions:
+        risk += 1
+    return risk
+
+
+def _lowest_risk_topic(topics: List[Dict[str, Any]], memory_signal: Dict[str, Any]) -> Dict[str, Any]:
+    return sorted(topics, key=lambda item: _memory_risk(item, memory_signal))[0]
+
+
+def _select_topic(
+    topics: List[Dict[str, Any]],
+    recent_template_ids: set,
+    pool: Dict[str, Any],
+    memory_signal: Dict[str, Any],
+) -> Tuple[Dict[str, Any], str, str, int]:
     today_slot = _today_weekday_slot()
     weekday_topics = [topic for topic in topics if topic.get("weekday_slot") == today_slot]
 
     if _prefer_weekday_slot(pool) and weekday_topics:
-        for topic in weekday_topics:
-            if _is_allowed_by_history(topic, recent_template_ids):
-                return topic, "weekday_slot", today_slot
-        return weekday_topics[0], "weekday_slot_history_override", today_slot
+        safe_weekday_topics = [
+            topic for topic in weekday_topics
+            if _is_allowed_by_history(topic, recent_template_ids) and _memory_risk(topic, memory_signal) < 5
+        ]
+        if safe_weekday_topics:
+            chosen = _lowest_risk_topic(safe_weekday_topics, memory_signal)
+            return chosen, "weekday_slot_memory_safe", today_slot, _memory_risk(chosen, memory_signal)
+        chosen = _lowest_risk_topic(weekday_topics, memory_signal)
+        return chosen, "weekday_slot_memory_override", today_slot, _memory_risk(chosen, memory_signal)
 
-    for topic in topics:
-        if _is_allowed_by_history(topic, recent_template_ids):
-            return topic, "avoid_recent_template_ids", today_slot
-    return topics[0], "fallback_first_topic", today_slot
+    safe_topics = [
+        topic for topic in topics
+        if _is_allowed_by_history(topic, recent_template_ids) and _memory_risk(topic, memory_signal) < 5
+    ]
+    if safe_topics:
+        chosen = _lowest_risk_topic(safe_topics, memory_signal)
+        return chosen, "decision_memory_safe_rotation", today_slot, _memory_risk(chosen, memory_signal)
+
+    chosen = _lowest_risk_topic(topics, memory_signal)
+    return chosen, "decision_memory_lowest_risk_fallback", today_slot, _memory_risk(chosen, memory_signal)
 
 
 def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
     pool = _load_topic_pool()
     history = state.get("script_history", [])
-    recent_template_ids = set(_recent_template_ids(history, limit=_history_limit(pool)))
+    memory_signal = state.get("decision_memory_signal") or _decision_memory_signal(_load_recent_decisions(limit=10))
+    recent_from_history = set(_recent_template_ids(history, limit=_history_limit(pool)))
+    recent_from_memory = set(memory_signal.get("recent_template_ids", []))
+    recent_template_ids = recent_from_history | recent_from_memory
     topics = _topic_candidates(pool)
-    chosen, selected_by, today_slot = _select_topic(topics, recent_template_ids, pool)
+    chosen, selected_by, today_slot, memory_risk = _select_topic(topics, recent_template_ids, pool, memory_signal)
 
     return {
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -186,11 +301,13 @@ def build_topic_guidance(state: Dict[str, Any]) -> Dict[str, Any]:
         "weekday_slot": chosen.get("weekday_slot"),
         "today_weekday_slot": today_slot,
         "selected_by": selected_by,
+        "memory_risk": memory_risk,
+        "memory_signal": memory_signal,
         "series_name": chosen.get("series_name"),
         "episode_role": chosen.get("episode_role"),
         "next_episode_hint": chosen.get("next_episode_hint"),
         "why_now": chosen.get("why_now"),
-        "avoid_recent_template_ids": list(recent_template_ids),
+        "avoid_recent_template_ids": sorted(recent_template_ids),
         "notes": "Advisory only. Generator reads this file and falls back if unavailable.",
     }
 
@@ -203,6 +320,8 @@ def collect_runtime_state() -> Dict[str, Any]:
     audience = _load_json("audience_insight.json", {})
     history = _load_json(os.path.join("agent_runs", "script_publish_history.json"), [])
     performance = _load_json(os.path.join("shared", "performance_log.json"), [])
+    decisions = _load_recent_decisions(limit=10)
+    memory_signal = _decision_memory_signal(decisions)
 
     instagram_state = "cooldown" if cooldown else "unknown"
     threads_state = "active"
@@ -221,6 +340,8 @@ def collect_runtime_state() -> Dict[str, Any]:
         "recent_history_count": len(history) if isinstance(history, list) else 0,
         "script_history": history[-10:] if isinstance(history, list) else [],
         "performance_count": len(performance) if isinstance(performance, list) else 0,
+        "decision_memory_count": len(decisions),
+        "decision_memory_signal": memory_signal,
         "instagram_state": instagram_state,
         "threads_state": threads_state,
         "today_weekday_slot": _today_weekday_slot(),
@@ -251,7 +372,7 @@ class CEORecommendationWorker:
             "당신은 1인 AI 기업 운영 CEO 에이전트입니다. "
             "로컬 LLM만 사용하며, SNS 자동화 시스템의 다음 회차 전략을 짧고 실행 가능하게 제안합니다. "
             "중복 콘텐츠를 피하고 Instagram 쿨다운 중에는 Threads 중심으로 운영합니다. "
-            "요일별 시리즈 편성표가 있으면 그 편성을 우선합니다."
+            "요일별 시리즈 편성표와 decision_memory의 실패/반복 신호를 함께 반영합니다."
         )
         user = (
             "현재 런타임 상태와 다음 주제 후보를 보고 다음 회차 운영 판단을 내려주세요.\n"
@@ -269,9 +390,9 @@ class CEORecommendationWorker:
             )
         fallback = (
             f"다음 회차는 '{topic_guidance['topic_title']}' 주제로 전환하세요.\n"
-            f"선정 기준: {topic_guidance.get('selected_by')} / 요일 슬롯: {topic_guidance.get('today_weekday_slot')}\n"
+            f"선정 기준: {topic_guidance.get('selected_by')} / 요일 슬롯: {topic_guidance.get('today_weekday_slot')} / 메모리 위험도: {topic_guidance.get('memory_risk')}\n"
             "Instagram은 쿨다운 여부를 우선 확인하고, 제한 중이면 Threads만 발행하세요.\n"
-            "성과 데이터가 부족하므로 조회수보다 중복 방지와 발행 안정성을 우선하세요."
+            "최근 decision_memory의 실패·반복 패턴을 피하면서 발행 안정성을 우선하세요."
         )
         return AgentResult(
             agent_name=self.name,
