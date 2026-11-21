@@ -1,9 +1,8 @@
 import json
 import os
 import re
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
@@ -27,6 +26,7 @@ class ObsidianRAGEngine:
         else:
             print("[RAG] 로컬 임베딩 패키지가 없어 키워드 검색 모드로 실행합니다.")
         self.vector_store = None
+        self.chunks = []
         self._ensure_fallback_vault()
 
     def _ensure_fallback_vault(self):
@@ -71,41 +71,52 @@ class ObsidianRAGEngine:
             return False
 
         fingerprint = self._vault_fingerprint()
-        if self._is_db_current(fingerprint):
-            print("[RAG] 옵시디언 메모 변경 없음. 기존 벡터 DB를 재사용합니다.")
-            return self.load_db()
-
-        print(f"[RAG] 옵시디언 메모 임베딩 빌드 중: {self.vault_path}")
+        if self.load_db(fingerprint):
+            return True
 
         try:
-            # 1. md 파일 로더 설정
-            loader = DirectoryLoader(
-                self.vault_path,
-                glob="**/*.md",
-                loader_cls=TextLoader,
-                loader_kwargs={'encoding': 'utf-8'}
-            )
-            documents = loader.load()
-            if not documents:
-                print("[RAG] 파싱 가능한 마크다운 파일이 존재하지 않습니다.")
+            import numpy as np
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+            splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
+            chunks = []
+            for entry in fingerprint["files"]:
+                path = Path(self.vault_path, entry["path"])
+                if any(part.startswith(".") for part in Path(entry["path"]).parts):
+                    continue
+                chunks.extend((path.name, text) for text in splitter.split_text(path.read_text(encoding="utf-8")))
+            if not chunks:
                 return False
 
-            # 2. 텍스트 분할 (청크 크기 600)
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
-            chunks = text_splitter.split_documents(documents)
-
-            # 3. 임베딩 계산 및 FAISS 저장
-            self.vector_store = FAISS.from_documents(chunks, self.embeddings)
-            self.vector_store.save_local(self.db_path)
-            self._save_fingerprint(fingerprint)
-            print(f"✅ RAG 로컬 벡터 DB 빌드/업데이트 성공 및 '{self.db_path}'에 저장 완료.")
+            vectors = np.asarray(self.embeddings.embed_documents([text for _, text in chunks]), dtype=np.float32)
+            self._set_index(chunks, vectors)
+            os.makedirs(self.db_path, exist_ok=True)
+            # Replace the whole snapshot together, including its source fingerprint.
+            with NamedTemporaryFile(dir=self.db_path, delete=False) as cache:
+                try:
+                    metadata = json.dumps({"fingerprint": fingerprint, "chunks": chunks}, ensure_ascii=False)
+                    np.savez(cache, metadata=metadata, vectors=vectors)
+                    cache.close()
+                    os.replace(cache.name, self._cache_path())
+                finally:
+                    Path(cache.name).unlink(missing_ok=True)
             return True
-        except Exception as e:
-            print(f"[Error] RAG 로컬 벡터 DB 빌드 실패: {e}")
+        except Exception as exc:
+            print(f"[RAG] 로컬 색인 생성 실패: {exc}")
             return False
 
-    def _fingerprint_path(self):
-        return os.path.join(self.db_path, "vault_fingerprint.json")
+    def _cache_path(self):
+        return os.path.join(self.db_path, "embeddings.npz")
+
+    def _set_index(self, chunks, vectors):
+        import faiss
+
+        if vectors.ndim != 2 or vectors.shape[0] != len(chunks) or vectors.shape[1] == 0:
+            raise ValueError("Invalid embedding dimensions")
+        index = faiss.IndexFlatL2(vectors.shape[1])
+        index.add(vectors)
+        self.vector_store = index
+        self.chunks = chunks
 
     def _vault_fingerprint(self):
         entries = []
@@ -124,60 +135,48 @@ class ObsidianRAGEngine:
                 except OSError:
                     continue
         return {
+            "model": _EMBEDDING_MODEL,
             "vault_path": os.path.abspath(self.vault_path),
             "files": sorted(entries, key=lambda item: item["path"]),
         }
 
-    def _is_db_current(self, fingerprint):
-        if not os.path.exists(os.path.join(self.db_path, "index.faiss")):
+    def load_db(self, fingerprint=None):
+        """Load plain vectors and document text. Legacy indexes rebuild from vault notes."""
+        if not self.embeddings or not os.path.isfile(self._cache_path()):
             return False
+        import numpy as np
         try:
-            with open(self._fingerprint_path(), "r", encoding="utf-8") as f:
-                previous = json.load(f)
-            return previous == fingerprint
-        except Exception:
+            with np.load(self._cache_path(), allow_pickle=False) as cache:
+                metadata = json.loads(cache["metadata"].item())
+                cached = metadata["fingerprint"]
+                if cached["vault_path"] != os.path.abspath(self.vault_path) or cached["model"] != _EMBEDDING_MODEL:
+                    return False
+                if fingerprint is not None and cached != fingerprint:
+                    return False
+                self._set_index(metadata["chunks"], cache["vectors"])
+            return True
+        except Exception as exc:
+            print(f"[RAG] 로컬 색인 재생성 필요: {exc}")
             return False
-
-    def _save_fingerprint(self, fingerprint):
-        os.makedirs(self.db_path, exist_ok=True)
-        with open(self._fingerprint_path(), "w", encoding="utf-8") as f:
-            json.dump(fingerprint, f, ensure_ascii=False, indent=2)
-
-    def load_db(self):
-        """로컬 FAISS DB 로드"""
-        if not self.embeddings:
-            return False
-        if os.path.exists(self.db_path):
-            try:
-                self.vector_store = FAISS.load_local(
-                    self.db_path,
-                    self.embeddings,
-                    allow_dangerous_deserialization=True  # 로컬 가동 자격 부여
-                )
-                return True
-            except Exception as e:
-                print(f"[Warning] 로컬 DB 로드 실패: {e}")
-        return False
 
     def retrieve_context(self, query, k=3):
         """특정 쿼리에 부합하는 옵시디언 메모 맥락 추출"""
         if not self.embeddings:
             return self._keyword_search(query, k=k)
 
-        if not self.vector_store:
-            if not self.load_db():
-                # DB가 없거나 깨졌을 시 즉시 재생성 시도
-                if not self.build_or_update_db():
-                    print("[RAG] DB를 조회할 수 없어 RAG 맥락을 생략합니다.")
-                    return ""
+        if k < 1:
+            return ""
+        if self.vector_store is None and not self.load_db():
+            if not self.build_or_update_db():
+                return self._keyword_search(query, k=k)
 
         try:
-            docs = self.vector_store.similarity_search(query, k=k)
-            context_parts = []
-            for i, doc in enumerate(docs):
-                source = os.path.basename(doc.metadata.get('source', 'unknown'))
-                context_parts.append(f"[{source} 메모]:\n{doc.page_content}")
-            return "\n\n".join(context_parts)
+            import numpy as np
+
+            vector = np.asarray([self.embeddings.embed_query(query)], dtype=np.float32)
+            _, indices = self.vector_store.search(vector, min(k, len(self.chunks)))
+            return "\n\n".join(f"[{self.chunks[i][0]} 메모]:\n{self.chunks[i][1]}"
+                               for i in indices[0] if i >= 0)
         except Exception as e:
             print(f"[Warning] 유사도 검색 중 오류 발생: {e}")
             return ""

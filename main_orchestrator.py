@@ -29,6 +29,7 @@ from agent_monitor import (
     write_human_summary,
 )
 from telegram_agent import (
+    consume_run_now,
     process_telegram_commands,
     send_telegram_message,
 )
@@ -316,12 +317,11 @@ def check_last_post_performance(worksheet):
     insights_url = f"https://graph.facebook.com/{API_VERSION}/{media_id}/insights"
     insights_params = {
         "metric": "impressions",
-        "access_token": ACCESS_TOKEN
     }
 
     impressions = 0
     try:
-        res = requests.get(insights_url, params=insights_params, timeout=8)
+        res = requests.get(insights_url, params=insights_params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=8)
         res_data = res.json()
         if res.status_code == 200 and "data" in res_data:
             impressions = res_data["data"][0]["values"][0].get("value", 0)
@@ -765,6 +765,21 @@ def run_orchestration_loop():
     )
     write_human_summary()
 
+def wait_for_next_run(seconds, state):
+    deadline = time.monotonic() + seconds
+    next_heartbeat = 0
+    while time.monotonic() < deadline:
+        if consume_run_now():
+            return
+        if time.monotonic() >= next_heartbeat:
+            heartbeat(state)
+            write_human_summary()
+            if process_telegram_commands().get("run_now"):
+                return
+            next_heartbeat = time.monotonic() + 60
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
 def main():
     INTERVAL_SECONDS = int(os.getenv("PIPELINE_INTERVAL_SECONDS", 6 * 3600))  # 기본 6시간
     update_pipeline(
@@ -797,19 +812,7 @@ def main():
                             write_human_summary()
                             print(f"\n[Orchestrator] 직전 업로드({last_date_str}) 후 {elapsed.total_seconds()/60:.1f}분 경과했습니다.")
                             print(f"  -> 중복 업로드 방지를 위해 앞으로 {sleep_seconds/60:.1f}분 대기 후 첫 공정을 가동합니다...")
-                            full_minutes = int(sleep_seconds // 60)
-                            run_now = False
-                            for _ in range(full_minutes):
-                                heartbeat("waiting_duplicate_guard")
-                                write_human_summary()
-                                if process_telegram_commands().get("run_now"):
-                                    print("[Telegram] 즉시 실행 명령을 받아 대기 시간을 건너뜁니다.")
-                                    run_now = True
-                                    break
-                                time.sleep(60)
-                            remaining = sleep_seconds % 60
-                            if remaining and not run_now:
-                                time.sleep(remaining)
+                            wait_for_next_run(sleep_seconds, "waiting_duplicate_guard")
     except Exception as e:
         print(f"\n[Warning] 중복 포스팅 대기 시간 확인 중 예외 발생 (즉시 기동): {e}")
 
@@ -823,18 +826,7 @@ def main():
             update_pipeline(state="waiting", next_run_at=next_at)
             write_human_summary()
             print(f"\n[Orchestrator] 다음 가동 시점까지 대기 중... ({wait_seconds/3600:.2f}시간, 다음 실행: {next_at})")
-            run_now = False
-            for _ in range(wait_seconds // 60):
-                heartbeat("waiting_for_next_run")
-                write_human_summary()
-                if process_telegram_commands().get("run_now"):
-                    print("[Telegram] 즉시 실행 명령을 받아 대기 시간을 건너뜁니다.")
-                    run_now = True
-                    break
-                time.sleep(60)
-            remaining = wait_seconds % 60
-            if remaining and not run_now:
-                time.sleep(remaining)
+            wait_for_next_run(wait_seconds, "waiting_for_next_run")
             run_orchestration_loop()
         except KeyboardInterrupt:
             print("\n[Orchestrator] 시스템 최고 관리자에 의해 가동이 종료되었습니다.")

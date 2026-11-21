@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MindFactory AI Brain + SNS Automation Dashboard</title>
   <!-- Google Fonts & Tailwind Icons CSS (Lucide) -->
-  <link rel="stylesheet" href="https://unpkg.com/lucide-static@latest/font/lucide.css">
+  <link rel="stylesheet" href="https://unpkg.com/lucide-static@1.77.0/font/lucide.css" integrity="sha384-UQSnZArEsiw7uegYpCrww7eR7DsFakbwsMYiGVNu145RBRJ6VQsIkhq2vfn4AVS1" crossorigin="anonymous">
   <!-- Vis.js CDN for Obsidian Knowledge Network Graph -->
-  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="https://unpkg.com/vis-network@10.1.5/standalone/umd/vis-network.min.js" integrity="sha384-GtjYkhwhAE+SrjDGQbQux3taYY5IiPH6XHwwKXF+WdyoI1hp193Dg+3BoQDfF7VH" crossorigin="anonymous" defer></script>
   <!-- Local Styles -->
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
@@ -145,19 +145,19 @@
               <div class="node-circle">3</div>
               <span class="node-label">Strategy</span>
             </div>
-            <div class="pipeline-node active" onclick="selectPipelineNode('story', this)">
+            <div class="pipeline-node active" onclick="selectPipelineNode('story_quality', this)">
               <div class="node-circle">4</div>
               <span class="node-label">Story / Quality</span>
             </div>
-            <div class="pipeline-node" onclick="selectPipelineNode('visual', this)">
+            <div class="pipeline-node" onclick="selectPipelineNode('visual_drive', this)">
               <div class="node-circle">5</div>
               <span class="node-label">Visual / Drive</span>
             </div>
-            <div class="pipeline-node" onclick="selectPipelineNode('publishing', this)">
+            <div class="pipeline-node" onclick="selectPipelineNode('publish', this)">
               <div class="node-circle">6</div>
               <span class="node-label">Publishing</span>
             </div>
-            <div class="pipeline-node" onclick="selectPipelineNode('performance', this)">
+            <div class="pipeline-node" onclick="selectPipelineNode('performance_learning', this)">
               <div class="node-circle">7</div>
               <span class="node-label">Feedback</span>
             </div>

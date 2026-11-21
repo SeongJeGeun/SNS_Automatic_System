@@ -29,11 +29,10 @@ def get_threads_post_ids(limit=10):
     params = {
         "fields": "id",
         "limit": limit,
-        "access_token": ACCESS_TOKEN,
     }
 
     try:
-        res = requests.get(threads_url, params=params, timeout=10)
+        res = requests.get(threads_url, params=params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200 and "data" in res_data:
             return [item["id"] for item in res_data["data"] if item.get("id")]
@@ -62,11 +61,10 @@ def get_threads_metrics(post_id):
     insights_url = f"{BASE_URL}/{post_id}/insights"
     params = {
         "metric": ",".join(POST_INSIGHT_METRICS),
-        "access_token": ACCESS_TOKEN,
     }
 
     try:
-        res = requests.get(insights_url, params=params, timeout=10)
+        res = requests.get(insights_url, params=params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200 and "data" in res_data:
             for item in res_data["data"]:
@@ -97,11 +95,10 @@ def get_threads_account_insights():
     profile_url = f"{BASE_URL}/me"
     profile_params = {
         "fields": "followers_count",
-        "access_token": ACCESS_TOKEN,
     }
 
     try:
-        res = requests.get(profile_url, params=profile_params, timeout=10)
+        res = requests.get(profile_url, params=profile_params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200:
             insights["user_id"] = str(res_data.get("id") or THREADS_USER_ID)
@@ -124,11 +121,10 @@ def fetch_profile_visits_7d():
         "period": "day",
         "since": since,
         "until": until,
-        "access_token": ACCESS_TOKEN,
     }
 
     try:
-        res = requests.get(insights_url, params=params, timeout=10)
+        res = requests.get(insights_url, params=params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200 and "data" in res_data:
             return sum_metric_values(res_data["data"])

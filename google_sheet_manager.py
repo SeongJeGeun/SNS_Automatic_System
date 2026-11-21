@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timedelta
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials as ServiceCredentials
 
 class GoogleSheetManager:
     def __init__(self, credentials_path="google_creds.json", sheet_name="MindFactory_SNS_Dashboard", tab_name=None, gspread_client=None):
@@ -28,7 +28,7 @@ class GoogleSheetManager:
                 
         # 2. google_creds.json (Service Account) 차선 시도
         if os.path.exists(self.credentials_path):
-            creds = ServiceAccountCredentials.from_json_keyfile_name(self.credentials_path, scope)
+            creds = ServiceCredentials.from_service_account_file(self.credentials_path, scopes=scope)
             return gspread.authorize(creds)
             
         print("[Warning] 구글 자격 증명 파일(token.json 또는 google_creds.json)이 존재하지 않아 시뮬레이션 모드로 동작합니다.")
@@ -47,9 +47,8 @@ class GoogleSheetManager:
             except Exception:
                 pass
         if not creds and os.path.exists(self.credentials_path):
-            from google.oauth2.service_account import Credentials as ServiceCredentials
             try:
-                creds = ServiceCredentials.from_service_account_file(self.credentials_path, scopes)
+                creds = ServiceCredentials.from_service_account_file(self.credentials_path, scopes=scopes)
             except Exception:
                 pass
                 

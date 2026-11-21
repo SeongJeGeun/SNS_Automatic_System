@@ -130,7 +130,9 @@
 
 시스템 구동을 위해 리포지토리 루트의 `.env` 파일에 아래 환경 변수를 명확히 선언해야 합니다.
 
-의존성은 아래처럼 설치합니다.
+운영 대시보드는 기본적으로 로컬에서만 열립니다. 원격 사용 시 HTTPS 프록시를 구성하고, 서버의 `.env`에 `DASHBOARD_PASSWORD`를 설정한 뒤 사용자 이름 `admin`으로 로그인하세요.
+
+Python 3.11 이상에서 의존성을 설치합니다.
 
 ```bash
 python3 -m pip install -r requirements.txt
