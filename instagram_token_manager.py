@@ -1,14 +1,14 @@
 # instagram_token_manager.py
 import os
-import re
 import requests
-import json
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+from filelock import FileLock
+from dotenv import load_dotenv, set_key
 
 load_dotenv()
-
-STATUS_JSON = os.path.join("agent_runs", "agent_status.json")
 
 def load_instagram_token():
     load_dotenv()
@@ -25,59 +25,37 @@ def load_instagram_token():
 def mask_token(token):
     if not token:
         return "미설정 (NULL)"
-    if len(token) <= 12:
-        return "**********"
-    return token[:6] + "****************" + token[-6:]
+    return "**********"
+
+def update_env_secrets(updates):
+    env_path = Path(".env")
+    with FileLock(".env.lock"):
+        original = env_path.read_bytes() if env_path.exists() else b""
+        with NamedTemporaryFile(dir=".", delete=False) as staged:
+            staged.write(original)
+        temp_path = Path(staged.name)
+        try:
+            for key, value in updates.items():
+                set_key(temp_path, key, value)
+            if original:
+                with NamedTemporaryFile(dir=".", delete=False) as backup:
+                    backup.write(original)
+                os.replace(backup.name, ".env.bak")
+            os.replace(temp_path, env_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        os.environ.update(updates)
+
 
 def save_token_securely(new_token, expires_at=None):
-    env_path = ".env"
-    bak_path = ".env.bak"
-
-    # 1. 기존 .env 백업 생성
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                env_content = f.read()
-            with open(bak_path, "w", encoding="utf-8") as f:
-                f.write(env_content)
-        except Exception as e:
-            print(f"[Warning] .env 백업 생성 중 오류 발생: {e}")
-
-    # 2. .env 파일 파싱 및 갱신
-    lines = []
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-    token_updated = False
-    expires_updated = False
-
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith("INSTAGRAM_ACCESS_TOKEN="):
-            new_lines.append(f"INSTAGRAM_ACCESS_TOKEN={new_token}\n")
-            token_updated = True
-        elif expires_at and line.strip().startswith("INSTAGRAM_TOKEN_EXPIRES_AT="):
-            new_lines.append(f"INSTAGRAM_TOKEN_EXPIRES_AT={expires_at}\n")
-            expires_updated = True
-        else:
-            new_lines.append(line)
-
-    if not token_updated:
-        new_lines.append(f"INSTAGRAM_ACCESS_TOKEN={new_token}\n")
-    if expires_at and not expires_updated:
-        new_lines.append(f"INSTAGRAM_TOKEN_EXPIRES_AT={expires_at}\n")
-
+    updates = {"INSTAGRAM_ACCESS_TOKEN": new_token}
+    if expires_at:
+        updates["INSTAGRAM_TOKEN_EXPIRES_AT"] = expires_at
     try:
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-        os.environ["INSTAGRAM_ACCESS_TOKEN"] = new_token
-        if expires_at:
-            os.environ["INSTAGRAM_TOKEN_EXPIRES_AT"] = expires_at
-        print("✅ .env 내 Instagram 액세스 토큰 정보 갱신 완료")
+        update_env_secrets(updates)
         return True
-    except Exception as e:
-        print(f"[Error] .env 토큰 쓰기 실패: {e}")
+    except OSError as exc:
+        print(f"[Error] .env 토큰 쓰기 실패: {type(exc).__name__}")
         return False
 
 def validate_token():
@@ -93,11 +71,11 @@ def validate_token():
     url = f"https://graph.facebook.com/{version}/me"
     params = {
         "fields": "id,name",
-        "access_token": token
     }
 
+    headers = {"Authorization": f"Bearer {token}"}
     try:
-        res = requests.get(url, params=params, timeout=10)
+        res = requests.get(url, params=params, headers=headers, timeout=10)
         res_data = res.json()
 
         if res.status_code == 200:
@@ -106,9 +84,8 @@ def validate_token():
                 test_url = f"https://graph.facebook.com/{version}/{account_id}"
                 test_params = {
                     "fields": "username,name",
-                    "access_token": token
                 }
-                test_res = requests.get(test_url, params=test_params, timeout=10)
+                test_res = requests.get(test_url, params=test_params, headers=headers, timeout=10)
                 if test_res.status_code != 200:
                     return False, f"인스타그램 계정 정보({account_id})에 대한 읽기 권한이 없거나 계정 ID 불일치: {test_res.text}"
             return True, "유효함"
@@ -118,7 +95,7 @@ def validate_token():
             return False, f"API Error {code}: {err_msg}"
 
     except Exception as e:
-        return False, f"네트워크/요청 예외: {str(e)}"
+        return False, f"네트워크/요청 예외: {type(e).__name__}"
 
 def get_token_expiry_status():
     creds = load_instagram_token()
@@ -188,14 +165,15 @@ def refresh_long_lived_token():
             new_expiry = (datetime.now() + timedelta(seconds=expires_in)).strftime("%Y-%m-%d %H:%M:%S")
 
             if new_token:
-                save_token_securely(new_token, new_expiry)
+                if not save_token_securely(new_token, new_expiry):
+                    return False, "갱신된 토큰을 저장하지 못했습니다."
                 return True, "토큰 리프레시 성공"
             return False, "응답에 access_token이 누락되었습니다."
         else:
             err = res_data.get("error", {}).get("message", "갱신 실패")
             return False, f"API Error: {err}"
     except Exception as e:
-        return False, f"네트워크 요청 실패: {str(e)}"
+        return False, f"네트워크 요청 실패: {type(e).__name__}"
 
 def exchange_short_lived_to_long_lived():
     creds = load_instagram_token()
@@ -234,14 +212,15 @@ def exchange_short_lived_to_long_lived():
             expires_in = res_data.get("expires_in", 5184000)
             new_expiry = (datetime.now() + timedelta(seconds=expires_in)).strftime("%Y-%m-%d %H:%M:%S")
             if long_token:
-                save_token_securely(long_token, new_expiry)
+                if not save_token_securely(long_token, new_expiry):
+                    return False, "교환된 토큰을 저장하지 못했습니다."
                 return True, "장기 토큰 교환 성공"
             return False, "장기 토큰 데이터 누락"
         else:
             err = res_data.get("error", {}).get("message", "교환 실패")
             return False, f"API Error: {err}"
     except Exception as e:
-        return False, f"네트워크 요청 예외: {str(e)}"
+        return False, f"네트워크 요청 예외: {type(e).__name__}"
 
 def perform_daily_health_check_and_refresh():
     """매일 1회 또는 실행 전 호출되어 토큰 상태를 검사하고 만료 10일 전일 경우 자동 갱신합니다."""

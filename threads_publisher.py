@@ -28,11 +28,7 @@ def _write_report(report: dict):
 
 
 def _masked(value: str) -> str:
-    if not value:
-        return "EMPTY"
-    if len(value) <= 10:
-        return f"set(length={len(value)})"
-    return f"{value[:6]}...{value[-4:]}(length={len(value)})"
+    return "SET" if value else "EMPTY"
 
 
 def debug_credentials():
@@ -79,7 +75,7 @@ def _build_text(script_data: dict) -> str:
 def _publish_text(text: str) -> str | None:
     """텍스트 전용 Threads 포스트 발행. 성공 시 post_id 반환."""
     url = f"{API_BASE}/{USER_ID}/threads"
-    r = requests.post(url, params={
+    r = requests.post(url, data={
         "media_type": "TEXT",
         "text": text,
         "access_token": ACCESS_TOKEN,
@@ -92,7 +88,7 @@ def _publish_text(text: str) -> str | None:
 
     time.sleep(3)
     pub_url = f"{API_BASE}/{USER_ID}/threads_publish"
-    pub_r = requests.post(pub_url, params={
+    pub_r = requests.post(pub_url, data={
         "creation_id": container_id,
         "access_token": ACCESS_TOKEN,
     }, timeout=15)

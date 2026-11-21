@@ -1,9 +1,13 @@
 # dashboard_server.py
+import asyncio
 import os
 import re
 import json
 import time
-import asyncio
+from threading import Lock
+
+from dashboard_access import DashboardAccess
+from dashboard_events import DashboardEvents
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -14,9 +18,10 @@ from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 # .env 로드
-load_dotenv(override=True)
+load_dotenv()
 
 app = FastAPI(title="MindFactory SNS Automation Dashboard Server")
+app.add_middleware(DashboardAccess, password=os.getenv("DASHBOARD_PASSWORD"))
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_OBSIDIAN_VAULT = str(PROJECT_ROOT / "obsidian_vault")
 
@@ -33,7 +38,6 @@ THREADS_LAST_UPLOAD_REPORT = os.path.join(MONITOR_DIR, "threads_last_upload_repo
 DAILY_REPORT = "daily_report.json"
 ORCHESTRATOR_LOG = "orchestrator.log"
 PAUSE_FLAG = os.path.join(MONITOR_DIR, "pipeline_paused.flag")
-RUN_NOW_REQUEST = os.path.join(MONITOR_DIR, "run_now.request")
 
 AUDIENCE_INSIGHT = "audience_insight.json"
 CONTENT_STRATEGY = "content_strategy.json"
@@ -318,7 +322,7 @@ def parse_obsidian_vault(vault_path: str) -> Optional[Dict[str, Any]]:
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="dashboard.html")
 
 # =====================================================================
 # 1. GET /api/status (현재 실행 상태)
@@ -327,7 +331,7 @@ async def serve_dashboard(request: Request):
 def get_status():
     # 데이터 소스 1순위: JSON / 2순위: MD 파일 파서 교차 연동
     status_data = safe_load_json(STATUS_JSON)
-    md_data = parse_agent_status_md()
+    md_data = {} if status_data else parse_agent_status_md()
     paused = os.path.exists(PAUSE_FLAG)
 
     is_running = False
@@ -387,21 +391,6 @@ def get_status():
         # 파일이 없을 시 폴백
         last_updated = datetime.now().isoformat()
 
-    # 3. orchestrator.log 융합 검증 (에러 여부 등 확인)
-    if os.path.exists(ORCHESTRATOR_LOG):
-        # 마지막 수정 시각
-        log_mtime = os.path.getmtime(ORCHESTRATOR_LOG)
-        # 10분 이내에 로그가 갱신되었고 에러 관련 지시어가 있다면
-        if time.time() - log_mtime < 600:
-            try:
-                with open(ORCHESTRATOR_LOG, "r", encoding="utf-8") as lf:
-                    log_content = lf.read()
-                    if "Error" in log_content or "Exception" in log_content:
-                        # 에러 감지 상태값 융합
-                        pass
-            except Exception:
-                pass
-
     # next_run_at 및 기타 메타 획득
     next_run_at = "대기 중"
     last_started_at = ""
@@ -445,78 +434,51 @@ def get_status():
 # =====================================================================
 # 2. GET /events (SSE 스트림)
 # =====================================================================
+def _file_stamp(path):
+    try:
+        stat = os.stat(path)
+        return stat.st_mtime_ns, stat.st_size, stat.st_ino
+    except OSError:
+        return None
+
+
+vault_lock = Lock()
+vault_cache = {"path": None, "expires": 0.0, "version": 0, "files": {}}
+
+
+def _vault_version(vault):
+    # Caller holds vault_lock. Coalesce metadata scans from HTTP requests and SSE.
+    if vault_cache["path"] == vault and time.monotonic() < vault_cache["expires"]:
+        return vault_cache["version"]
+    files = {vault: os.path.isdir(vault)}
+    for root, _, names in os.walk(vault):
+        for name in names:
+            if name.endswith(".md"):
+                path = os.path.join(root, name)
+                files[path] = _file_stamp(path)
+    if vault != vault_cache["path"] or files != vault_cache["files"]:
+        vault_cache.update(path=vault, files=files, version=vault_cache["version"] + 1)
+        vault_cache.pop("graph", None)
+    vault_cache["expires"] = time.monotonic() + 2.5
+    return vault_cache["version"]
+
+
+def dashboard_snapshot():
+    files = (STATUS_JSON, STATUS_MD, DAILY_REPORT, ORCHESTRATOR_LOG, COMMAND_REQUESTS,
+             STORY_RESPONSE, STRATEGY_RESPONSE, PAUSE_FLAG)
+    vault = os.getenv("OBSIDIAN_VAULT_PATH", DEFAULT_OBSIDIAN_VAULT)
+    with vault_lock:
+        version = _vault_version(vault)
+    return tuple(_file_stamp(path) for path in files), version
+
+
+event_feed = DashboardEvents(dashboard_snapshot, get_status)
+
+
 @app.get("/events")
-async def sse_events(request: Request):
-    load_dotenv(override=True)
-    vault_path = os.getenv("OBSIDIAN_VAULT_PATH", DEFAULT_OBSIDIAN_VAULT)
-
-    files_to_watch = [
-        STATUS_JSON,
-        STATUS_MD,
-        DAILY_REPORT,
-        ORCHESTRATOR_LOG,
-        COMMAND_REQUESTS,
-        STORY_RESPONSE,
-        STRATEGY_RESPONSE,
-        PAUSE_FLAG
-    ]
-
-    def get_mtimes():
-        mtimes = {}
-        for f in files_to_watch:
-            if os.path.exists(f):
-                mtimes[f] = os.path.getmtime(f)
-            else:
-                mtimes[f] = 0.0
-        return mtimes
-
-    def get_vault_state():
-        if not vault_path or not os.path.exists(vault_path) or not os.path.isdir(vault_path):
-            return ""
-        try:
-            state_parts = []
-            for root, dirs, files in os.walk(vault_path):
-                for file in files:
-                    if file.endswith(".md"):
-                        fp = os.path.join(root, file)
-                        try:
-                            state_parts.append(f"{file}:{os.path.getmtime(fp)}")
-                        except Exception:
-                            pass
-            return "|".join(state_parts)
-        except Exception:
-            return ""
-
-    async def event_generator():
-        last_mtimes = get_mtimes()
-        last_vault_state = get_vault_state()
-
-        while True:
-            if await request.is_disconnected():
-                break
-
-            await asyncio.sleep(2.5) # 2.5초 마다 파일 및 폴더 상태 체크
-
-            # 1. 오케스트레이터 상태 파일 감시
-            current_mtimes = get_mtimes()
-            changed = False
-            for f in files_to_watch:
-                if current_mtimes[f] != last_mtimes[f]:
-                    changed = True
-                    break
-
-            if changed:
-                last_mtimes = current_mtimes
-                status = get_status()
-                yield f"data: {json.dumps({'type': 'status_update', **status}, ensure_ascii=False)}\n\n"
-
-            # 2. 옵시디언 보관소(Vault) 변동 감시
-            current_vault_state = get_vault_state()
-            if current_vault_state != last_vault_state:
-                last_vault_state = current_vault_state
-                yield f"data: {json.dumps({'type': 'brain_graph_update'}, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+async def sse_events():
+    return StreamingResponse(event_feed.stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 # =====================================================================
 # 3. GET /api/pipeline/{step_id} (단계별 상세 정보)
@@ -607,6 +569,7 @@ def get_pipeline_step(step_id: str):
     if not detail:
         raise HTTPException(status_code=404, detail="Step not found")
 
+    detail = detail.copy()
     status_data = safe_load_json(STATUS_JSON)
     if status_data:
         agents = status_data.get("agents", {})
@@ -623,7 +586,6 @@ def get_pipeline_step(step_id: str):
         target_agent = agent_mapping.get(step_id)
         if target_agent and target_agent in agents:
             agent_info = agents[target_agent]
-            detail = detail.copy()
             detail["current_task"] = f"{agent_info.get('detail', detail['current_task'])} (상태: {agent_info.get('state')})"
             if agent_info.get("error"):
                 detail["api_status"] = f"에러 감지: {agent_info.get('error')}"
@@ -656,7 +618,11 @@ def get_brain_graph():
     load_dotenv(override=True)
     vault_path = os.getenv("OBSIDIAN_VAULT_PATH", DEFAULT_OBSIDIAN_VAULT)
 
-    graph_data = parse_obsidian_vault(vault_path)
+    with vault_lock:
+        _vault_version(vault_path)
+        if "graph" not in vault_cache:
+            vault_cache["graph"] = parse_obsidian_vault(vault_path)
+        graph_data = vault_cache["graph"]
     if graph_data:
         return {
             "status": "연결됨",
@@ -967,15 +933,20 @@ def get_ai_thoughts():
 # 10. GET /api/integrations (외부 연동 상태)
 # =====================================================================
 @app.get("/api/integrations")
-def get_integrations():
-    load_dotenv(override=True)
+async def get_integrations():
+    async with integration_lock:
+        if time.monotonic() >= integration_cache["expires"]:
+            integration_cache["data"] = await asyncio.to_thread(_read_integrations)
+            integration_cache["expires"] = time.monotonic() + 30
+        return integration_cache["data"]
 
-    def mask_token(token: Optional[str]) -> str:
-        if not token:
-            return "미설정 (NULL)"
-        if len(token) <= 12:
-            return "**********"
-        return token[:6] + "****************" + token[-6:]
+
+integration_lock = asyncio.Lock()
+integration_cache = {"expires": 0.0}
+
+
+def _read_integrations():
+    load_dotenv(override=True)
 
     def validate_threads_token() -> Dict[str, Any]:
         token = os.getenv("THREADS_ACCESS_TOKEN", "").strip()
@@ -991,7 +962,8 @@ def get_integrations():
             import requests
             res = requests.get(
                 "https://graph.threads.net/v1.0/me",
-                params={"fields": "id,username,name", "access_token": token},
+                params={"fields": "id,username,name"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=8,
             )
             data = res.json()
@@ -1015,7 +987,7 @@ def get_integrations():
                 "status": "error",
                 "account_name": "검증 실패",
                 "account_id": "Threads API 연결 실패",
-                "last_error": str(exc)[:200]
+                "last_error": type(exc).__name__
             }
 
     obsidian_path = os.getenv("OBSIDIAN_VAULT_PATH", DEFAULT_OBSIDIAN_VAULT)
@@ -1046,7 +1018,7 @@ def get_integrations():
             "name": "Instagram Graph API",
             "status": insta_status,
             "account_name": "mindfactory.official",
-            "account_id": token_creds["account_id"] or "17841436434753995",
+            "account_id": token_creds["account_id"] or "미설정",
             "masked_token": instagram_token_manager.mask_token(token_creds["access_token"]),
             "token_type": "long_lived" if token_creds["expires_at"] else "short_lived",
             "expires_at": token_creds["expires_at"] or "미기록",
@@ -1061,7 +1033,7 @@ def get_integrations():
             "status": threads_status["status"],
             "account_name": threads_status["account_name"],
             "account_id": threads_status["account_id"],
-            "masked_token": mask_token(os.getenv("THREADS_ACCESS_TOKEN")),
+            "masked_token": instagram_token_manager.mask_token(os.getenv("THREADS_ACCESS_TOKEN")),
             "token_type": "threads_user_token",
             "expires_at": "수동 갱신 필요",
             "expires_in_days": 0,
@@ -1074,8 +1046,8 @@ def get_integrations():
             "name": "Telegram Bot API",
             "status": "connected" if os.getenv("TELEGRAM_BOT_TOKEN") else "error",
             "account_name": os.getenv("TELEGRAM_BOT_NAME", "EveryAgent_bot"),
-            "account_id": os.getenv("TELEGRAM_CHAT_ID", "6219612697"),
-            "masked_token": mask_token(os.getenv("TELEGRAM_BOT_TOKEN")),
+            "account_id": os.getenv("TELEGRAM_CHAT_ID") or "미설정",
+            "masked_token": instagram_token_manager.mask_token(os.getenv("TELEGRAM_BOT_TOKEN")),
             "permissions": ["SendMessage", "CommandHandler"],
             "expires_in_days": 9999,
             "last_checked": datetime.now().isoformat(),
@@ -1136,7 +1108,7 @@ def get_integrations():
 # 11. POST /api/integrations/test (연결 테스트)
 # =====================================================================
 @app.post("/api/integrations/test")
-async def test_integration(payload: Dict[str, str]):
+def test_integration(payload: Dict[str, str]):
     target = payload.get("target")
     if target == "instagram":
         token = os.getenv("INSTAGRAM_ACCESS_TOKEN", "")
@@ -1154,7 +1126,8 @@ async def test_integration(payload: Dict[str, str]):
             import requests
             res = requests.get(
                 "https://graph.threads.net/v1.0/me",
-                params={"fields": "id,username", "access_token": token},
+                params={"fields": "id,username"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=8,
             )
             data = res.json()
@@ -1163,7 +1136,7 @@ async def test_integration(payload: Dict[str, str]):
             err = data.get("error", {}) if isinstance(data, dict) else {}
             return {"ok": False, "message": err.get("message") or "Threads API 검증 실패"}
         except Exception as exc:
-            return {"ok": False, "message": f"Threads API 연결 테스트 실패: {str(exc)[:120]}"}
+            return {"ok": False, "message": f"Threads API 연결 테스트 실패: {type(exc).__name__}"}
 
     elif target == "telegram":
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -1193,30 +1166,15 @@ async def save_integration_token(payload: Dict[str, str]):
     if not target or not token_val:
          raise HTTPException(status_code=400, detail="Missing parameter")
 
-    CONFIG_LOCAL_PATH = "config_local.json"
-    config_data = {}
-    if os.path.exists(CONFIG_LOCAL_PATH):
-        try:
-            with open(CONFIG_LOCAL_PATH, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-
-    env_mapping = {
-        "instagram": "INSTAGRAM_ACCESS_TOKEN",
-        "telegram": "TELEGRAM_BOT_TOKEN"
-    }
-
-    env_key = env_mapping.get(target)
+    env_key = {"instagram": "INSTAGRAM_ACCESS_TOKEN", "telegram": "TELEGRAM_BOT_TOKEN"}.get(target)
     if env_key:
-        config_data[env_key] = token_val
-        try:
-            with open(CONFIG_LOCAL_PATH, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=2)
-            os.environ[env_key] = token_val
-            return {"ok": True, "message": f"{target} 토큰이 config_local.json에 백업되었으며 실시간 메모리에 임시 바인딩되었습니다."}
-        except Exception as e:
-             return {"ok": False, "message": f"토큰 로컬 저장 실패: {str(e)}"}
+        if any(char.isspace() for char in token_val) or len(token_val) > 4096:
+            raise HTTPException(status_code=400, detail="Invalid token")
+        from instagram_token_manager import update_env_secrets
+        async with integration_lock:
+            await asyncio.to_thread(update_env_secrets, {env_key: token_val})
+            integration_cache["expires"] = 0
+        return {"ok": True, "message": f"{target} 토큰을 저장했습니다."}
 
     return {"ok": False, "message": "지원되지 않는 연동 저장 타겟입니다."}
 
@@ -1229,17 +1187,10 @@ def trigger_run_now():
     if status.get("is_running"):
         return {"ok": False, "message": "이미 파이프라인 에이전트 공정이 실행 중입니다."}
 
-    os.makedirs(MONITOR_DIR, exist_ok=True)
-    payload = {
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source": "web_dashboard"
-    }
-    try:
-        with open(RUN_NOW_REQUEST, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        return {"ok": True, "message": "즉시 실행 요청 시그널 파일(run_now.request) 생성 완료. 오케스트레이터가 감지 시 즉각 가동을 시작합니다."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create run_now request: {str(e)}")
+    from telegram_agent import mark_run_now
+    if not mark_run_now(source="web_dashboard"):
+        return {"ok": False, "message": "즉시 실행 요청이 이미 대기 중입니다."}
+    return {"ok": True, "message": "즉시 실행 요청을 접수했습니다."}
 
 # =====================================================================
 # 14. POST /api/natural-language (자연어 명령 큐 전달 브릿지)
@@ -1285,11 +1236,13 @@ def api_validate_instagram_token():
 # 16. POST /api/integrations/refresh-instagram (인스타 토큰 리프레시 API)
 # =====================================================================
 @app.post("/api/integrations/refresh-instagram")
-def api_refresh_instagram_token():
+async def api_refresh_instagram_token():
     import instagram_token_manager
-    ok, message = instagram_token_manager.refresh_long_lived_token()
+    async with integration_lock:
+        ok, message = await asyncio.to_thread(instagram_token_manager.refresh_long_lived_token)
+        integration_cache["expires"] = 0
     return {"ok": ok, "message": message}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("dashboard_server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8000")))

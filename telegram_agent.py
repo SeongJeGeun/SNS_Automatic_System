@@ -62,7 +62,7 @@ def send_telegram_message(text):
             return True
         print(f"[Telegram] 전송 실패 ({response.status_code}): {response.text}")
     except Exception as exc:
-        print(f"[Telegram] 전송 중 예외: {exc}")
+        print(f"[Telegram] 전송 중 예외: {type(exc).__name__}")
     return False
 
 
@@ -101,7 +101,7 @@ def get_updates(timeout=0):
             _write_offset(max(update["update_id"] for update in updates) + 1)
         return updates
     except Exception as exc:
-        print(f"[Telegram] 업데이트 조회 중 예외: {exc}")
+        print(f"[Telegram] 업데이트 조회 중 예외: {type(exc).__name__}")
         return []
 
 
@@ -127,17 +127,19 @@ def mark_run_now(source="telegram"):
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": source,
     }
-    with open(RUN_NOW_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    try:
+        with open(RUN_NOW_FILE, "x", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except FileExistsError:
+        return False
+    return True
 
 
 def consume_run_now():
-    if not os.path.exists(RUN_NOW_FILE):
-        return False
     try:
         os.remove(RUN_NOW_FILE)
-    except OSError:
-        pass
+    except FileNotFoundError:
+        return False
     return True
 
 

@@ -1,12 +1,27 @@
 // static/dashboard.js
 
+// Escape dynamic values in markup. URLs and style values are validated separately.
+function html(strings, ...values) {
+  const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return strings.reduce((out, literal, i) => out + literal +
+    (i < values.length ? String(values[i] ?? '').replace(/[&<>"']/g, ch => entities[ch]) : ''), '');
+}
+
+function externalURL(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+  } catch {}
+  return null;
+}
+
 // 1. Toast Notification System
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.style.borderLeftColor = type === 'success' ? 'var(--color-teal)' : 'var(--status-danger)';
-  toast.innerHTML = `<span style="display:flex;align-items:center;gap:0.5rem;"><i class="lucide-info"></i> ${message}</span>`;
+  toast.innerHTML = html`<span style="display:flex;align-items:center;gap:0.5rem;"><i class="lucide-info"></i> ${message}</span>`;
 
   container.appendChild(toast);
 
@@ -120,6 +135,9 @@ function updatePipelineNodes(activeStep, isRunning) {
 
 // 3. Trigger Run Now Post
 async function toggleExecution() {
+  const button = document.getElementById('btn-run-now');
+  if (button.disabled) return;
+  button.disabled = true;
   try {
     const res = await fetch('/api/run-now', {
       method: 'POST',
@@ -134,6 +152,8 @@ async function toggleExecution() {
     }
   } catch (err) {
     showToast('파이프라인 실행 요청 전송 실패', 'error');
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -146,68 +166,36 @@ async function fetchDriveLinks() {
     const linksGrid = document.querySelector('.links-grid');
     if (!linksGrid) return;
 
-    linksGrid.innerHTML = `
-      <div class="link-row">
-        <div class="link-info">
-          <span class="link-name">오늘 카드뉴스 결과 폴더</span>
-          <div class="link-meta">
-            <span class="pill info">Google Drive</span>
-            <span>주소: ${data.daily_output_folder.substring(0, 45)}${data.daily_output_folder.length > 45 ? '...' : ''}</span>
-          </div>
+    const rows = [
+      ['오늘 카드뉴스 결과 폴더', 'Google Drive', data.daily_output_folder],
+      ['합성 이미지 결과 폴더', 'Google Drive', data.image_folder],
+      ['성과 리포트 Google Sheet', 'Google Sheets', data.report_sheet],
+      ['최종 Instagram 게시물 링크', 'Instagram Graph', data.latest_post_url],
+      ['최근 Threads 게시물 링크', 'Threads API', data.latest_threads_post_url,
+        `상태: ${data.latest_threads_status} · ID: ${data.latest_threads_post_id}`]
+    ];
+    linksGrid.replaceChildren();
+    for (const [title, platform, value, status] of rows) {
+      const row = document.createElement('div');
+      row.className = 'link-row';
+      row.innerHTML = html`
+        <div class="link-info"><span class="link-name">${title}</span>
+          <div class="link-meta"><span class="pill info">${platform}</span>
+          <span>${status ?? `주소: ${value || '미설정'}`}</span></div>
         </div>
-        <a href="${data.daily_output_folder}" target="_blank" class="btn btn-outline btn-teal ${data.daily_output_folder === '미설정' ? 'disabled' : ''}" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;" ${data.daily_output_folder === '미설정' ? 'onclick="event.preventDefault(); showToast(\'드라이브 주소가 설정되지 않았습니다.\', \'error\');"' : ''}>
+        <a target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-teal">
           <i class="lucide-external-link"></i> 열기
-        </a>
-      </div>
-      <div class="link-row">
-        <div class="link-info">
-          <span class="link-name">합성 이미지 결과 폴더</span>
-          <div class="link-meta">
-            <span class="pill info">Google Drive</span>
-            <span>주소: ${data.image_folder.substring(0, 45)}${data.image_folder.length > 45 ? '...' : ''}</span>
-          </div>
-        </div>
-        <a href="${data.image_folder}" target="_blank" class="btn btn-outline btn-teal ${data.image_folder === '미설정' ? 'disabled' : ''}" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;" ${data.image_folder === '미설정' ? 'onclick="event.preventDefault(); showToast(\'이미지 폴더 주소가 설정되지 않았습니다.\', \'error\');"' : ''}>
-          <i class="lucide-external-link"></i> 열기
-        </a>
-      </div>
-      <div class="link-row">
-        <div class="link-info">
-          <span class="link-name">성과 리포트 Google Sheet</span>
-          <div class="link-meta">
-            <span class="pill success">Google Sheets</span>
-            <span>주소: ${data.report_sheet.substring(0, 45)}${data.report_sheet.length > 45 ? '...' : ''}</span>
-          </div>
-        </div>
-        <a href="${data.report_sheet}" target="_blank" class="btn btn-outline btn-teal ${data.report_sheet === '미설정' ? 'disabled' : ''}" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;" ${data.report_sheet === '미설정' ? 'onclick="event.preventDefault(); showToast(\'성과 구글시트 주소가 설정되지 않았습니다.\', \'error\');"' : ''}>
-          <i class="lucide-external-link"></i> 열기
-        </a>
-      </div>
-      <div class="link-row">
-        <div class="link-info">
-          <span class="link-name">최종 Instagram 게시물 링크</span>
-          <div class="link-meta">
-            <span class="pill info" style="background-color:rgba(139,92,246,0.1); color:var(--color-purple-light);">Instagram Graph</span>
-            <span>주소: ${data.latest_post_url}</span>
-          </div>
-        </div>
-        <a href="${data.latest_post_url}" target="_blank" class="btn btn-outline ${data.latest_post_url === '미설정' ? 'disabled' : ''}" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;" ${data.latest_post_url === '미설정' ? 'onclick="event.preventDefault(); showToast(\'최근 발행 포스트 링크가 존재하지 않습니다.\', \'error\');"' : ''}>
-          <i class="lucide-external-link"></i> 열기
-        </a>
-      </div>
-      <div class="link-row">
-        <div class="link-info">
-          <span class="link-name">최근 Threads 게시물 링크</span>
-          <div class="link-meta">
-            <span class="pill info" style="background-color:rgba(6,182,212,0.1); color:var(--color-teal-light);">Threads API</span>
-            <span>상태: ${data.latest_threads_status} · ID: ${data.latest_threads_post_id}</span>
-          </div>
-        </div>
-        <a href="${data.latest_threads_post_url}" target="_blank" class="btn btn-outline btn-teal ${data.latest_threads_post_url === '미설정' ? 'disabled' : ''}" style="padding:0.4rem 0.8rem; font-size:0.75rem; text-decoration:none;" ${data.latest_threads_post_url === '미설정' ? 'onclick="event.preventDefault(); showToast(\'최근 Threads 게시물 링크가 존재하지 않습니다.\', \'error\');"' : ''}>
-          <i class="lucide-external-link"></i> 열기
-        </a>
-      </div>
-    `;
+        </a>`;
+      const link = row.querySelector('a');
+      const url = externalURL(value);
+      if (url) {
+        link.href = url;
+      } else {
+        link.classList.add('disabled');
+        link.setAttribute('aria-disabled', 'true');
+      }
+      linksGrid.appendChild(row);
+    }
   } catch (err) {
      console.error('Failed to load drive links:', err);
   }
@@ -229,7 +217,7 @@ async function fetchTrends() {
       const statusClass = t.status === '상승' ? 'up' : (t.status === '안정' ? 'stable' : 'candidate');
       const statusText = t.status === '상승' ? '상승세 (HOT)' : (t.status === '안정' ? '안정 (Stable)' : '후보 (Candidate)');
 
-      card.innerHTML = `
+      card.innerHTML = html`
         <div class="trend-header">
           <span class="trend-title">${t.keyword}</span>
           <span class="status-pill ${statusClass}">${statusText}</span>
@@ -265,7 +253,7 @@ async function fetchPerformance() {
       if (p.judgement === '성공') pillClass = 'success';
       else if (p.judgement === '치유 발동') pillClass = 'warning';
 
-      tr.innerHTML = `
+      tr.innerHTML = html`
         <td style="font-weight:600; color:var(--text-primary);">${p.topic}</td>
         <td>${p.goal}</td>
         <td style="color:${p.judgement === '성공' ? 'var(--status-success)' : (p.judgement === '치유 발동' ? 'var(--status-danger)' : 'var(--text-secondary)')}">${p.current}</td>
@@ -295,13 +283,13 @@ async function fetchGoals() {
       const barColor = g.achievement_rate >= 100 ? 'var(--status-success)' : 'linear-gradient(to right, var(--color-purple), var(--color-teal))';
       const judgeColor = g.ai_judgement.includes('미달') ? 'var(--status-warning)' : 'var(--status-success)';
 
-      item.innerHTML = `
+      item.innerHTML = html`
         <div class="goal-info">
           <span class="goal-name"><i class="lucide-star" style="color:var(--color-teal); font-size:0.9rem;"></i> ${g.name}</span>
           <span class="goal-values">현재 ${g.current} / 목표 ${g.target} (${g.achievement_rate}%)</span>
         </div>
         <div class="goal-progress">
-          <div class="goal-progress-bar" style="width: ${g.achievement_rate}%; background: ${barColor};"></div>
+          <div class="goal-progress-bar" style="width: ${Math.max(0, Math.min(100, Number(g.achievement_rate) || 0))}%; background: ${barColor};"></div>
         </div>
         <div class="goal-meta">
           <span>AI 판단: <strong style="color:${judgeColor};">${g.achievement_rate >= 100 ? '목표 달성' : '미달 (보완 중)'}</strong></span>
@@ -333,7 +321,7 @@ async function fetchAIThoughts() {
       else if (chat.agent === 'Learning Agent') { avatarClass = 'learning-agent'; avatarInitial = 'LA'; }
 
       bubble.className = `chat-bubble ${avatarClass}`;
-      bubble.innerHTML = `
+      bubble.innerHTML = html`
         <div class="chat-avatar">${avatarInitial}</div>
         <div class="chat-content">
           <span class="chat-sender">${chat.agent}</span>
@@ -372,24 +360,26 @@ async function fetchOperationMemory() {
     threadsStatus.textContent = summary.threads_connected ? 'Threads 연결 및 게시 검증 완료' : 'Threads 확인 필요';
     threadsStatus.className = `status-pill ${summary.threads_connected ? 'up' : 'candidate'}`;
     if (threadsLink) {
-      threadsLink.href = summary.latest_threads_post || '#';
-      threadsLink.classList.toggle('disabled', !summary.latest_threads_post || summary.latest_threads_post === '미기록');
+      const url = externalURL(summary.latest_threads_post);
+      if (url) threadsLink.href = url;
+      else threadsLink.removeAttribute('href');
+      threadsLink.classList.toggle('disabled', !url);
     }
 
     if (completedList) {
-      completedList.innerHTML = (data.completed || []).map(item => `
+      completedList.innerHTML = (data.completed || []).map(item => html`
         <div class="operation-item done"><i class="lucide-check-circle2"></i><span>${item}</span></div>
       `).join('');
     }
 
     if (pendingList) {
-      pendingList.innerHTML = (data.pending || []).map(item => `
+      pendingList.innerHTML = (data.pending || []).map(item => html`
         <div class="operation-item waiting"><i class="lucide-circle-dot"></i><span>${item}</span></div>
       `).join('');
     }
 
     if (reportSteps) {
-      reportSteps.innerHTML = (data.report_steps || []).map(step => `
+      reportSteps.innerHTML = (data.report_steps || []).map(step => html`
         <div class="report-step">
           <span class="report-step-title">${step.title} · ${step.when}</span>
           <span class="report-step-data">${step.data}</span>
@@ -399,7 +389,7 @@ async function fetchOperationMemory() {
     }
 
     if (crossRules) {
-      crossRules.innerHTML = (data.cross_rules || []).map(rule => `
+      crossRules.innerHTML = (data.cross_rules || []).map(rule => html`
         <div class="operation-item"><i class="lucide-repeat-2"></i><span>${rule}</span></div>
       `).join('');
     }
@@ -431,7 +421,7 @@ async function fetchIntegrations() {
     data.forEach(item => {
       const card = document.createElement('div');
       card.className = 'integration-card';
-      card.setAttribute('onclick', `openIntegrationModal('${item.key}')`);
+      card.addEventListener('click', () => openIntegrationModal(item.key));
 
       let icon = 'lucide-settings';
       if (item.key === 'instagram') icon = 'lucide-instagram';
@@ -444,7 +434,7 @@ async function fetchIntegrations() {
 
       const statusText = item.status === 'connected' ? '정상' : '확인필요';
 
-      card.innerHTML = `
+      card.innerHTML = html`
         <div class="integration-icon"><i class="${icon}"></i></div>
         <span class="integration-name">${item.name}</span>
         <span class="integration-status ${item.status}">${statusText}</span>
@@ -457,14 +447,17 @@ async function fetchIntegrations() {
 }
 
 // 5. Detailed Pipeline Steps API call
+let detailRequest;
 async function selectPipelineNode(nodeId, element) {
+  detailRequest?.abort();
+  detailRequest = new AbortController();
   document.querySelectorAll('.pipeline-node').forEach(node => {
     node.classList.remove('active');
   });
   element.classList.add('active');
 
   try {
-    const res = await fetch(`/api/pipeline/${nodeId}`);
+    const res = await fetch(`/api/pipeline/${nodeId}`, {signal: detailRequest.signal});
     const data = await res.json();
 
     document.getElementById('panel-title').textContent = data.title;
@@ -477,7 +470,7 @@ async function selectPipelineNode(nodeId, element) {
     document.getElementById('panel-files').textContent = data.related_files.join(', ');
     document.getElementById('panel-api').textContent = data.api_status;
   } catch (err) {
-    console.error('Failed to load step details:', err);
+    if (err.name !== 'AbortError') console.error('Failed to load step details:', err);
   }
 }
 
@@ -626,7 +619,7 @@ async function sendNLCommand() {
   userBubble.className = 'chat-bubble';
   userBubble.style.alignSelf = 'flex-end';
   userBubble.style.flexDirection = 'row-reverse';
-  userBubble.innerHTML = `
+  userBubble.innerHTML = html`
     <div class="chat-avatar" style="border-color:var(--color-purple);color:white;background:var(--color-purple)">FW</div>
     <div class="chat-content" style="border-top-left-radius:12px;border-top-right-radius:0;background:rgba(139,92,246,0.1)">
       <div class="chat-sender" style="text-align:right">포워드 (Operator)</div>
@@ -647,7 +640,7 @@ async function sendNLCommand() {
     if (data.ok) {
       const responseBubble = document.createElement('div');
       responseBubble.className = 'chat-bubble strategy-agent';
-      responseBubble.innerHTML = `
+      responseBubble.innerHTML = html`
         <div class="chat-avatar" style="border-color:var(--color-purple);color:var(--color-purple-light)">SA</div>
         <div class="chat-content">
           <div class="chat-sender">Strategy Agent</div>
@@ -820,7 +813,7 @@ function jsonParse(str) {
 }
 
 // Window load init
-window.addEventListener('load', () => {
+document.addEventListener('DOMContentLoaded', () => {
   fetchStatus();
   fetchDriveLinks();
   fetchTrends();

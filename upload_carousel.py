@@ -211,8 +211,8 @@ def upload_to_imgur(file_path):
     url = "https://api.imgur.com/3/image"
     try:
         with open(file_path, "rb") as img:
-            payload = {"image": img.read()}
-            res = requests.post(url, headers=headers, files=payload)
+            payload = {"image": img}
+            res = requests.post(url, headers=headers, files=payload, timeout=(5, 60))
             res_data = res.json()
             if res.status_code == 200 and res_data.get("success"):
                 return res_data["data"]["link"]
@@ -227,13 +227,12 @@ def wait_for_container_status(container_id):
     check_url = f"https://graph.facebook.com/{API_VERSION}/{container_id}"
     params = {
         "fields": "status_code",
-        "access_token": ACCESS_TOKEN,
     }
 
     print(f"  - 컨테이너 {container_id} 상태 확인 중...")
     for _ in range(15):
         try:
-            res = requests.get(check_url, params=params, timeout=10)
+            res = requests.get(check_url, params=params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
             res_data = res.json()
             status = res_data.get("status_code", "").upper()
             if status == "FINISHED":
@@ -276,7 +275,7 @@ def upload_to_instagram(image_urls, caption):
             "is_carousel_item": "true",
             "access_token": ACCESS_TOKEN,
         }
-        res = requests.post(f"{base_url}/media", params=params)
+        res = requests.post(f"{base_url}/media", data=params, timeout=(5, 30))
         res_data = res.json()
 
         if res.status_code == 200 and "id" in res_data:
@@ -307,7 +306,7 @@ def upload_to_instagram(image_urls, caption):
         "access_token": ACCESS_TOKEN,
     }
 
-    res = requests.post(f"{base_url}/media", params=params)
+    res = requests.post(f"{base_url}/media", data=params, timeout=(5, 30))
     res_data = res.json()
 
     if res.status_code == 200 and "id" in res_data:
@@ -332,7 +331,7 @@ def upload_to_instagram(image_urls, caption):
     published_id = None
     for attempt in range(1, 4):
         print(f"  - 발행 시도 {attempt}회차...")
-        publish_res = requests.post(f"{base_url}/media_publish", params=publish_params)
+        publish_res = requests.post(f"{base_url}/media_publish", data=publish_params, timeout=(5, 30))
         publish_data = publish_res.json()
 
         if publish_res.status_code == 200 and "id" in publish_data:

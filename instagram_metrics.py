@@ -35,11 +35,10 @@ def fetch_media_counts(media_id):
     media_url = f"https://graph.facebook.com/{API_VERSION}/{media_id}"
     media_params = {
         "fields": "comments_count,like_count",
-        "access_token": ACCESS_TOKEN,
     }
 
     try:
-        res = requests.get(media_url, params=media_params, timeout=10)
+        res = requests.get(media_url, params=media_params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200:
             return (
@@ -56,7 +55,6 @@ def fetch_insights(media_id):
     insights_url = f"https://graph.facebook.com/{API_VERSION}/{media_id}/insights"
     insights_params = {
         "metric": ",".join(INSIGHT_METRICS),
-        "access_token": ACCESS_TOKEN,
     }
 
     comments_count, likes = fetch_media_counts(media_id)
@@ -72,7 +70,7 @@ def fetch_insights(media_id):
     }
 
     try:
-        res = requests.get(insights_url, params=insights_params, timeout=10)
+        res = requests.get(insights_url, params=insights_params, headers={"Authorization": f"Bearer {ACCESS_TOKEN}"}, timeout=10)
         res_data = res.json()
         if res.status_code == 200 and "data" in res_data:
             for item in res_data["data"]:
